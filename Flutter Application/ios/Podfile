@@ -1,0 +1,52 @@
+# Definiert die globale Plattform. (Passe die Version ggf. an, falls ein Plugin eine höhere Mindestversion verlangt.)
+platform :ios, '12.4'
+
+# Mit "use_frameworks!" werden alle Abhängigkeiten als Frameworks eingebunden – wichtig, wenn Plugins in Swift geschrieben sind.
+use_frameworks!
+
+# Deaktiviere die CocoaPods-Analytik, um die Build-Latenz zu senken.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+# Konfiguriere das Xcode-Projekt (Runner) für die verschiedenen Build-Umgebungen.
+project 'Runner', {
+  'Debug'   => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+# Diese Funktion ermittelt den FLUTTER_ROOT-Pfad aus der Generated.xcconfig.
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} muss existieren. Führe 'flutter pub get' aus, bevor du 'pod install' manuell startest."
+  end
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT nicht gefunden in #{generated_xcode_build_settings_path}. Versuche, 'flutter pub get' erneut auszuführen."
+end
+
+# Lade die Flutter-Podhelper-Datei aus dem Flutter SDK.
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+# Setze iOS-spezifische Podfile-Einstellungen.
+flutter_ios_podfile_setup
+
+# Definiere dein Target – hier wird für das Runner-Target (die iOS-App) alles installiert.
+target 'Runner' do
+  # Installiere alle Flutter-Abhängigkeiten und -Pods.
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  # Inneres Target für Tests, das die Suchpfade erben soll.
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+# Füge alle zusätzlichen iOS-spezifischen Build-Einstellungen hinzu.
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+  end
+end
