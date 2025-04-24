@@ -1,273 +1,351 @@
-import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:flutter_barometer/flutter_barometer.dart';
-import 'package:path_provider/path_provider.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-// Modell für eine Messung
+import 'package:equations/equations.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_barometer/flutter_barometer.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+void main() => runApp(const TrackingApp());
+
+/* ======================== DOMAIN ====================================== */
+
 class Measurement {
-  final DateTime timestamp;
-  final double latitude;
-  final double longitude;
-  final double gpsAltitude;
-  final double? altimeterHeight;
-
-  Measurement({
-    required this.timestamp,
-    required this.latitude,
-    required this.longitude,
-    required this.gpsAltitude,
-    this.altimeterHeight,
-  });
+  final DateTime t;
+  final double lat, lon, gpsAlt;
+  final double? baroAlt;
+  Measurement(this.t, this.lat, this.lon, this.gpsAlt, this.baroAlt);
 }
 
-void main() {
-  runApp(MyApp());
-}
+/* ======================== ROOT ======================================== */
 
-class MyApp extends StatelessWidget {
+class TrackingApp extends StatelessWidget {
+  const TrackingApp({super.key});
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Tracking App',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: MyHomePage(),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  @override
-  _MyHomePageState createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  Position? _currentPosition;
-  String _status = "Bereit";
-  double? _altimeterHeight;
-  Timer? _locationTimer;
-  StreamSubscription? _barometerSubscription;
-  // Liste, in der alle Messungen gespeichert werden
-  List<Measurement> _measurements = [];
-  bool _isTracking = false;
-
-  // Startet das Tracking: Timer für GPS und Abonnement des Barometer-Streams
-  void _startTracking() {
-    setState(() {
-      _measurements.clear();
-      _isTracking = true;
-      _status = "Tracking gestartet";
-    });
-    // Starte GPS-Messung alle 5 Sekunden
-    _locationTimer =
-        Timer.periodic(Duration(seconds: 5), (_) => _fetchLocation());
-    // Starte Barometer-Stream (nur auf iOS, falls verfügbar)
-    if (Theme.of(context).platform == TargetPlatform.iOS) {
-      _barometerSubscription =
-          flutterBarometerEvents.listen((FlutterBarometerEvent event) {
-        // event ist vom Typ BarometerEvent, der den Luftdruck enthält
-        double pressure = event.pressure; // in hPa
-        const double seaLevelPressure = 1013.25;
-        double altitude =
-            44330 * (1 - pow(pressure / seaLevelPressure, 0.1903).toDouble());
-        setState(() {
-          _altimeterHeight = altitude;
-        });
-      });
-    }
-  }
-
-  // Stoppt das Tracking
-  void _stopTracking() {
-    _locationTimer?.cancel();
-    _barometerSubscription?.cancel();
-    setState(() {
-      _isTracking = false;
-      _status = "Tracking gestoppt";
-    });
-  }
-
-  // GPS-Daten abrufen und Messung speichern
-  Future<void> _fetchLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      setState(() => _status = "Standortdienste sind deaktiviert.");
-      return;
-    }
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
-      setState(() => _status = "Keine Standort-Berechtigung.");
-      return;
-    }
-    try {
-      Position pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
+  Widget build(BuildContext ctx) => MaterialApp(
+        title: 'Tracking App',
+        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
+        home: const HomePage(),
       );
-      setState(() {
-        _currentPosition = pos;
-        _status =
-            "Messung erfasst: ${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}";
-        // Erstelle eine Messung mit aktuellem Zeitpunkt und den Werten
-        _measurements.add(
-          Measurement(
-            timestamp: DateTime.now(),
-            latitude: pos.latitude,
-            longitude: pos.longitude,
-            gpsAltitude: pos.altitude,
-            altimeterHeight: _altimeterHeight,
-          ),
-        );
-      });
-    } catch (e) {
-      setState(() => _status = "Fehler: $e");
-    }
-  }
+}
 
-  // Speichert die gesammelten Daten als GPX-Datei
-  Future<void> _saveGPXFile() async {
-    if (_measurements.isEmpty) return;
+/* ======================== STATEFUL HOME =============================== */
 
-    StringBuffer gpxBuffer = StringBuffer();
-    gpxBuffer.writeln('<?xml version="1.0" encoding="UTF-8"?>');
-    gpxBuffer.writeln(
-        '<gpx version="1.1" creator="TrackingApp" xmlns="http://www.topografix.com/GPX/1/1">');
-    gpxBuffer.writeln('<trk>');
-    gpxBuffer.writeln('<name>Tracking Data</name>');
-    gpxBuffer.writeln('<trkseg>');
-    for (var m in _measurements) {
-      gpxBuffer.writeln('<trkpt lat="${m.latitude}" lon="${m.longitude}">');
-      // Hier wird die GPS-Höhe verwendet – alternativ kann auch der Barometerwert genutzt werden
-      gpxBuffer.writeln('<ele>${m.gpsAltitude.toStringAsFixed(1)}</ele>');
-      gpxBuffer
-          .writeln('<time>${m.timestamp.toUtc().toIso8601String()}</time>');
-      gpxBuffer.writeln('</trkpt>');
-    }
-    gpxBuffer.writeln('</trkseg>');
-    gpxBuffer.writeln('</trk>');
-    gpxBuffer.writeln('</gpx>');
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
 
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      final path = directory.path;
-      final file = File('$path/tracking_data.gpx');
-      await file.writeAsString(gpxBuffer.toString());
-      setState(() {
-        _status = "GPX-Datei gespeichert: $path/tracking_data.gpx";
-      });
-    } catch (e) {
-      setState(() {
-        _status = "Fehler beim Speichern der GPX-Datei: $e";
-      });
-    }
-  }
+class _HomePageState extends State<HomePage> {
+  /* ---------- STATE --------------------------------------------------- */
+  final _meas = <Measurement>[];
+  final _scroll = ScrollController();
+  double? _baroAlt;
+  Timer? _gpsTimer;
+  StreamSubscription? _baroSub;
+  bool _tracking = false;
+  String _status = 'Bereit';
 
+  /* ---------- LIFECYCLE ---------------------------------------------- */
   @override
   void dispose() {
-    _locationTimer?.cancel();
-    _barometerSubscription?.cancel();
+    _gpsTimer?.cancel();
+    _baroSub?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
+  /* ---------- TRACKING ------------------------------------------------ */
+  void _start() {
+    setState(() {
+      _tracking = true;
+      _status = 'Tracking läuft …';
+      _meas.clear();
+    });
+
+    _gpsTimer =
+        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
+
+    _baroSub = flutterBarometerEvents.listen((e) {
+      const p0 = 1013.25;
+      final alt =
+          (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble(); // num→double
+      setState(() => _baroAlt = alt);
+    });
+  }
+
+  Future<void> _capturePosition() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.best);
+      setState(() {
+        _meas.add(Measurement(DateTime.now(), pos.latitude, pos.longitude,
+            pos.altitude, _baroAlt));
+        _status =
+            'Fix: ${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}';
+      });
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent + 72,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      _scroll.animateTo(_scroll.position.maxScrollExtent + 72,
+          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    } on Exception catch (e) {
+      setState(() => _status = 'GPS-Fehler: $e');
+    }
+  }
+
+  Future<void> _stopAndSave() async {
+    _gpsTimer?.cancel();
+    _baroSub?.cancel();
+    setState(() => _tracking = false);
+    final file = await _writeGPX();
+    await Share.shareXFiles([XFile(file.path)], subject: 'GPX-Export');
+  }
+
+  /* ---------- GPX EXPORT --------------------------------------------- */
+  Future<File> _writeGPX() async {
+    final buf = StringBuffer()
+      ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
+      ..writeln(
+          '<gpx version="1.1" creator="tracking_app" xmlns="http://www.topografix.com/GPX/1/1">')
+      ..writeln('<metadata><copyright author="THI SS25"/></metadata>')
+      ..writeln('<trk><name>${_fileStamp()}</name><trkseg>');
+    for (final m in _meas) {
+      buf
+        ..writeln('<trkpt lat="${m.lat}" lon="${m.lon}">')
+        ..writeln('<ele>${m.gpsAlt.toStringAsFixed(1)}</ele>')
+        ..writeln('<time>${m.t.toUtc().toIso8601String()}</time>')
+        ..writeln('</trkpt>');
+    }
+    buf..writeln('</trkseg></trk></gpx>');
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/${_fileStamp()}.gpx');
+    return file.writeAsString(buf.toString()).then((f) {
+      setState(() => _status = 'Gespeichert: ${f.path}');
+      return f;
+    });
+  }
+
+  String _fileStamp() =>
+      DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-');
+
+  /* ---------- DISTANCES ---------------------------------------------- */
+
+  List<double> _distances() {
+    double cum = 0;
+    final list = <double>[0];
+    for (var i = 1; i < _meas.length; i++) {
+      cum += _haversine(_meas[i - 1], _meas[i]);
+      list.add(cum);
+    }
+    return list; // km
+  }
+
+  static const _rEarth = 6371.0; // km
+  double _haversine(Measurement a, Measurement b) {
+    final dLat = _deg(b.lat - a.lat);
+    final dLon = _deg(b.lon - a.lon);
+    final lat1 = _deg(a.lat);
+    final lat2 = _deg(b.lat);
+    final h =
+        pow(sin(dLat / 2), 2) + cos(lat1) * cos(lat2) * pow(sin(dLon / 2), 2);
+    return 2 * _rEarth * asin(sqrt(h));
+  }
+
+  double _deg(double d) => d * pi / 180;
+
+  /* ---------- SMOOTHING ---------------------------------------------- */
+
+  final _filterNames = ['Raw', 'Spline', 'LOESS'];
+  String _selFilter = 'Raw';
+
+  List<double> _applyFilter(List<double> x, List<double> y) {
+    // Safety: zu wenig Daten oder nicht-steigend? -> Rohdaten zurückgeben
+    if (x.length < 3 || x.toSet().length != x.length) return y;
+    switch (_selFilter) {
+      case 'Spline':
+        final nodes = <InterpolationNode>[];
+        for (var i = 0; i < x.length; i++) {
+          if (i == 0 || x[i] > x[i - 1]) {
+            nodes.add(InterpolationNode(x: x[i], y: y[i]));
+          }
+        }
+        final spline = SplineInterpolation(nodes: nodes);
+        return x.map(spline.compute).toList();
+      case 'LOESS':
+        return _loess(x, y, window: .15, iters: 2);
+      default:
+        return y;
+    }
+  }
+
+  /* ---------- MINIMAL LOESS ------------------------------------------ */
+
+  List<double> _loess(List<double> x, List<double> y,
+      {double window = .1, int iters = 2}) {
+    final n = x.length;
+    final wSize = max(3, (window * n).round());
+    var yHat = List<double>.from(y);
+
+    for (var iter = 0; iter < iters; iter++) {
+      final res = List<double>.filled(n, 0);
+      for (var i = 0; i < n; i++) {
+        // ---- k-nächste Nachbarn nach |x-xi|
+        final idx = List<int>.generate(n, (j) => j)
+          ..sort((a, b) => (x[a] - x[i]).abs().compareTo((x[b] - x[i]).abs()));
+        final nn = idx.take(wSize).toList();
+
+        // ---- Tricube-Gewichte
+        final dMax = nn.map((j) => (x[j] - x[i]).abs()).reduce(max);
+        final w = [
+          for (final j in nn)
+            pow(1 - pow(((x[j] - x[i]).abs() / dMax), 3), 3).toDouble()
+        ];
+
+        // ---- X-Matrix: [1, dx, dx²]
+        final List<List<double>> X = [
+          for (final j in nn)
+            [
+              1.0,
+              (x[j] - x[i]),
+              pow(x[j] - x[i], 2).toDouble(),
+            ]
+        ];
+
+        // ---- X^T
+        final List<List<double>> XT = List.generate(
+          3,
+          (k) => [for (final row in X) row[k]],
+        );
+
+        // ---- diag(W)
+        final List<List<double>> W = List.generate(
+          wSize,
+          (r) => List.generate(wSize, (c) => r == c ? w[r] : 0.0),
+        );
+
+        final XT_W = _matMul(XT, W);
+
+        final beta = _solve(
+          _matMul(XT_W, X),
+          _matVec(XT_W, [for (final j in nn) y[j]]),
+        );
+
+        yHat[i] = beta[0]; // da (x - xi) = 0
+        res[i] = (y[i] - yHat[i]).abs();
+      }
+      if (res.reduce((a, b) => a + b) / n < 1e-6) break; // trivialer Stopp
+    }
+    return yHat;
+  }
+
+  /* ---------- LINEAR-ALGEBRA HELPERS ---------------------------------- */
+
+  List<List<double>> _matMul(List<List<double>> A, List<List<double>> B) {
+    final m = A.length, n = B[0].length, k = B.length;
+    return List.generate(
+      m,
+      (i) => List.generate(
+        n,
+        (j) => Iterable<int>.generate(k)
+            .map((l) => A[i][l] * B[l][j])
+            .reduce((a, b) => a + b),
+      ),
+    );
+  }
+
+  List<double> _matVec(List<List<double>> A, List<double> v) => [
+        for (final row in A)
+          Iterable<int>.generate(v.length)
+              .map((i) => row[i] * v[i])
+              .reduce((a, b) => a + b)
+      ];
+
+  List<double> _solve(List<List<double>> A, List<double> b) {
+    double det(List<List<double>> m) =>
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+        m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+        m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+
+    final d = det(A);
+    if (d.abs() < 1e-12) return [0, 0, 0];
+
+    List<double> col(int c) => [for (final r in A) r[c]];
+    final dx = det([b, col(1), col(2)]);
+    final dy = det([col(0), b, col(2)]);
+    final dz = det([col(0), col(1), b]);
+    return [dx / d, dy / d, dz / d];
+  }
+
+  /* ======================== UI ======================================= */
+
   @override
-  Widget build(BuildContext context) {
-    final pos = _currentPosition;
+  Widget build(BuildContext ctx) {
+    final dist = _distances();
+    final altRaw = _meas.map((m) => m.gpsAlt).toList();
+    final altSm = _applyFilter(dist, altRaw);
+
     return Scaffold(
-      appBar: AppBar(title: Text('Tracking App mit GPX Export')),
-      body: SingleChildScrollView(
-        child: Column(
+      appBar: AppBar(
+        title: const Text('Tracking App'),
+        actions: [
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selFilter,
+              items: _filterNames
+                  .map((f) => DropdownMenuItem(value: f, child: Text(f)))
+                  .toList(),
+              onChanged: (v) => setState(() => _selFilter = v!),
+            ),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(child: _buildChart(dist, altRaw, altSm)),
+          const Divider(height: 1),
+          Expanded(
+            child: Scrollbar(
+              thumbVisibility: true,
+              controller: _scroll,
+              child: ListView.separated(
+                controller: _scroll,
+                itemCount: _meas.length,
+                separatorBuilder: (_, __) => const Divider(height: .5),
+                itemBuilder: (_, i) => _MeasurementTile(m: _meas[i]),
+              ),
+            ),
+          ),
+          Text(_status),
+          const SizedBox(height: 4),
+        ],
+      ),
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(
           children: [
-            // Anzeige der aktuellen Messung
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: pos != null
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Aktuelle Messung:',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('Zeit: ${DateTime.now().toLocal()}'),
-                        Text('Latitude: ${pos.latitude.toStringAsFixed(6)}'),
-                        Text('Longitude: ${pos.longitude.toStringAsFixed(6)}'),
-                        Text('GPS-Höhe: ${pos.altitude.toStringAsFixed(1)} m'),
-                        if (_altimeterHeight != null)
-                          Text(
-                              'Barometer-Höhe: ${_altimeterHeight!.toStringAsFixed(1)} m'),
-                        SizedBox(height: 10),
-                        Text(_status, style: TextStyle(color: Colors.grey)),
-                      ],
-                    )
-                  : Text('$_status'),
-            ),
-            Divider(),
-            // Das Koordinatensystem als Diagramm
-            Container(
-              height: 200,
-              padding: EdgeInsets.all(8.0),
-              child: CustomPaint(
-                painter: CoordinateChartPainter(_measurements),
-                child: Container(),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _tracking ? null : _start,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Start'),
               ),
             ),
-            Divider(),
-            // Tabelle mit allen Messungen
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text('Gesammelte Messungen:',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            Container(
-              height: 300, // Feste Höhe, anpassbar
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Zeit')),
-                    DataColumn(label: Text('Latitude')),
-                    DataColumn(label: Text('Longitude')),
-                    DataColumn(label: Text('GPS-Höhe (m)')),
-                    DataColumn(label: Text('Barometer (m)')),
-                  ],
-                  rows: _measurements.map((m) {
-                    return DataRow(cells: [
-                      DataCell(Text(m.timestamp.toLocal().toString())),
-                      DataCell(Text(m.latitude.toStringAsFixed(6))),
-                      DataCell(Text(m.longitude.toStringAsFixed(6))),
-                      DataCell(Text(m.gpsAltitude.toStringAsFixed(1))),
-                      DataCell(Text(m.altimeterHeight != null
-                          ? m.altimeterHeight!.toStringAsFixed(1)
-                          : 'n/a')),
-                    ]);
-                  }).toList(),
-                ),
-              ),
-            ),
-            Divider(),
-            // Start-/Stop-Buttons und GPX-Export
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isTracking ? null : _startTracking,
-                    child: Text("Start"),
-                  ),
-                  ElevatedButton(
-                    onPressed: _isTracking
-                        ? () {
-                            _stopTracking();
-                            _saveGPXFile();
-                          }
-                        : null,
-                    child: Text("Ende & Speichern"),
-                  ),
-                ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _tracking ? _stopAndSave : null,
+                icon: const Icon(Icons.stop),
+                label: const Text('Stop & GPX'),
               ),
             ),
           ],
@@ -275,66 +353,62 @@ class _MyHomePageState extends State<MyHomePage> {
       ),
     );
   }
+
+  /* ---------------- CHART -------------------------------------------- */
+
+  Widget _buildChart(List<double> x, List<double> raw, List<double> sm) {
+    if (x.length < 2) return const Center(child: Text('Noch keine Daten'));
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: LineChart(
+        LineChartData(
+          minX: 0,
+          maxX: x.last,
+          gridData: FlGridData(show: true),
+          lineTouchData: const LineTouchData(enabled: false),
+          titlesData: FlTitlesData(
+            leftTitles: AxisTitles(
+                sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+            bottomTitles: AxisTitles(
+                sideTitles: SideTitles(showTitles: true, reservedSize: 32)),
+            rightTitles: const AxisTitles(),
+            topTitles: const AxisTitles(),
+          ),
+          lineBarsData: [
+            _line(raw, x, Colors.blue, false),
+            _line(sm, x, Colors.orange, true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  LineChartBarData _line(List<double> y, List<double> x, Color c, bool dash) =>
+      LineChartBarData(
+        spots: [
+          for (var i = 0; i < x.length; i++) FlSpot(x[i], y[i]),
+        ],
+        isCurved: true,
+        color: c,
+        barWidth: 2,
+        dashArray: dash ? [8, 4] : null,
+      );
 }
 
-class CoordinateChartPainter extends CustomPainter {
-  final List<Measurement> measurements;
+/* ---------------- LIST-TILE ------------------------------------------- */
 
-  CoordinateChartPainter(this.measurements);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paintAxis = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 2.0;
-    final paintPoint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 4.0;
-
-    // Zeichne X- und Y-Achsen (hier einfach am unteren und linken Rand)
-    canvas.drawLine(
-      Offset(40, size.height - 40),
-      Offset(size.width - 10, size.height - 40),
-      paintAxis,
-    );
-    canvas.drawLine(Offset(40, size.height - 40), Offset(40, 10), paintAxis);
-
-    if (measurements.isEmpty) return;
-
-    // Bestimme min/max für Latitude und Longitude, um zu skalieren
-    double minLat = measurements.first.latitude;
-    double maxLat = measurements.first.latitude;
-    double minLon = measurements.first.longitude;
-    double maxLon = measurements.first.longitude;
-    for (var m in measurements) {
-      if (m.latitude < minLat) minLat = m.latitude;
-      if (m.latitude > maxLat) maxLat = m.latitude;
-      if (m.longitude < minLon) minLon = m.longitude;
-      if (m.longitude > maxLon) maxLon = m.longitude;
-    }
-    if (minLat == maxLat) {
-      minLat -= 0.001;
-      maxLat += 0.001;
-    }
-    if (minLon == maxLon) {
-      minLon -= 0.001;
-      maxLon += 0.001;
-    }
-    final double leftMargin = 40;
-    final double bottomMargin = 40;
-    final double drawWidth = size.width - leftMargin - 10;
-    final double drawHeight = size.height - bottomMargin - 10;
-    for (var m in measurements) {
-      double normLon = (m.longitude - minLon) / (maxLon - minLon);
-      double normLat = (m.latitude - minLat) / (maxLat - minLat);
-      double x = leftMargin + normLon * drawWidth;
-      double y = 10 + (1 - normLat) * drawHeight;
-      canvas.drawCircle(Offset(x, y), 3.0, paintPoint);
-    }
-  }
+class _MeasurementTile extends StatelessWidget {
+  final Measurement m;
+  const _MeasurementTile({required this.m});
 
   @override
-  bool shouldRepaint(covariant CoordinateChartPainter oldDelegate) {
-    return oldDelegate.measurements != measurements;
-  }
+  Widget build(BuildContext ctx) => ListTile(
+        title: Text('${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}'),
+        subtitle: Text('GPS ${m.gpsAlt.toStringAsFixed(1)} m | '
+            'Baro ${m.baroAlt?.toStringAsFixed(1) ?? 'n/a'} m'),
+        trailing: Text(
+          TimeOfDay.fromDateTime(m.t).format(ctx),
+          style: const TextStyle(fontSize: 12),
+        ),
+      );
 }

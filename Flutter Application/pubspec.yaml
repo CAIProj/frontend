@@ -1,16 +1,19 @@
 name: tracking_app
-description: A Flutter app to track GPS and barometer altitude and export as GPX.
-version: 1.0.0+1
+description: A Flutter app to track GPS + barometer altitude and export GPX.
+version: 1.1.0+2
 
 environment:
-  sdk: ">=2.18.0 <3.0.0"
+  sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  geolocator: ^9.0.2
+  geolocator: ^10.0.1
   flutter_barometer: ^0.1.0
-  path_provider: ^2.0.11
+  path_provider: ^2.1.2
+  share_plus: ^7.2.0          # Files teilen  [oai_citation:0‡Dart packages](https://pub.dev/packages/share_plus?utm_source=chatgpt.com)
+  fl_chart: ^0.66.2           # Distance-Altitude-Diagramm
+  equations: ^5.0.0           # Cubic spline  [oai_citation:1‡Dart packages](https://pub.dev/documentation/equations/latest/equations/SplineInterpolation-class.html?utm_source=chatgpt.com)
 
 dev_dependencies:
   flutter_test:
