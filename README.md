@@ -7,7 +7,7 @@ This is the frontend of our Tracking App, designed to visualize GPS data, altitu
 ## ⚙️ Getting Started
 
 ```bash
-git clone https://github.com/yourusername/tracking-app-frontend.git
+git clone https://github.com/CAIProj/frontend.git
 cd tracking-app-frontend
 npm install
 npm run dev
