@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:convert';
+import 'package:xml/xml.dart' as xml;
 
 import 'package:equations/equations.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -9,6 +11,8 @@ import 'package:flutter_barometer/flutter_barometer.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:intl/intl.dart';
 
 void main() => runApp(const TrackingApp());
 
@@ -21,6 +25,20 @@ class Measurement {
   Measurement(this.t, this.lat, this.lon, this.gpsAlt, this.baroAlt);
 }
 
+class TrackFile {
+  final String name;
+  final DateTime date;
+  final int pointCount;
+  final List<Measurement> measurements;
+
+  TrackFile({
+    required this.name,
+    required this.date,
+    required this.pointCount,
+    required this.measurements,
+  });
+}
+
 /* ======================== ROOT ======================================== */
 
 class TrackingApp extends StatelessWidget {
@@ -28,7 +46,7 @@ class TrackingApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) => MaterialApp(
-        title: 'Altitude Tracker',
+        title: 'TrackIN',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
@@ -104,6 +122,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _status = 'Ready';
   Position? _currentPosition;
   final _maxPoints = 1000; // Maximum points to store for memory optimization
+
+  // Track loading status and currently loaded file
+  bool _isLoadedTrack = false;
+  TrackFile? _loadedTrack;
 
   /* ---------- LIFECYCLE ---------------------------------------------- */
   @override
@@ -286,8 +308,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _stopAndSave() async {
+    // Properly cancel all tracking services
     _gpsTimer?.cancel();
+    _gpsTimer = null;
     _baroSub?.cancel();
+    _baroSub = null;
+
     setState(() {
       _tracking = false;
       _status = 'Tracking stopped';
@@ -329,7 +355,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final buf = StringBuffer()
       ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
       ..writeln(
-          '<gpx version="1.1" creator="Altitude Tracker" xmlns="http://www.topografix.com/GPX/1/1">')
+          '<gpx version="1.1" creator="TrackIN" xmlns="http://www.topografix.com/GPX/1/1">')
       ..writeln('<metadata>')
       ..writeln('  <name>Altitude Tracking Data</name>')
       ..writeln('  <time>${DateTime.now().toUtc().toIso8601String()}</time>')
@@ -395,97 +421,169 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   double _deg(double d) => d * pi / 180;
 
   /* ---------- SMOOTHING ---------------------------------------------- */
+  // Add the ability to show both raw and smoothed data
+  bool _showRaw = true;
+  bool _showSmoothed = true;
   final _filterNames = ['Raw', 'Spline', 'LOESS'];
-  String _selFilter = 'Raw';
+  String _selFilter = 'Spline';
 
   List<double> _applyFilter(List<double> x, List<double> y) {
     // Safety: too few data or non-increasing? -> Return raw data
-    if (x.length < 3 || x.toSet().length != x.length) return y;
+    if (x.length < 3) return List<double>.from(y);
+
+    // Ensure x values are sorted and unique for proper interpolation
+    List<double> xVals = List<double>.from(x);
+    List<double> yVals = List<double>.from(y);
+
+    // For completely identical values, return the original
+    if (xVals.toSet().length <= 1) return yVals;
 
     switch (_selFilter) {
       case 'Spline':
-        final nodes = <InterpolationNode>[];
-        for (var i = 0; i < x.length; i++) {
-          if (i == 0 || x[i] > x[i - 1]) {
-            nodes.add(InterpolationNode(x: x[i], y: y[i]));
+        try {
+          // Create a clean list of nodes with strictly increasing x values
+          final nodes = <InterpolationNode>[];
+          double lastX = double.negativeInfinity;
+
+          for (var i = 0; i < xVals.length; i++) {
+            if (xVals[i] > lastX) {
+              nodes.add(InterpolationNode(x: xVals[i], y: yVals[i]));
+              lastX = xVals[i];
+            }
           }
+
+          // Need at least 3 points for a proper spline
+          if (nodes.length < 3) return yVals;
+
+          final spline = SplineInterpolation(nodes: nodes);
+
+          // Now compute the spline for each original x value
+          List<double> smoothed = [];
+          for (var i = 0; i < xVals.length; i++) {
+            try {
+              smoothed.add(spline.compute(xVals[i]));
+            } catch (e) {
+              // Fallback to original if spline computation fails
+              smoothed.add(yVals[i]);
+            }
+          }
+          return smoothed;
+        } catch (e) {
+          // If any error occurs, return the original data
+          return yVals;
         }
-        final spline = SplineInterpolation(nodes: nodes);
-        return x.map(spline.compute).toList();
 
       case 'LOESS':
-        return _loess(x, y, window: .15, iters: 2);
+        try {
+          return _loess(xVals, yVals, window: .25, iters: 3);
+        } catch (e) {
+          return yVals;
+        }
 
       default:
-        return y;
+        return yVals;
     }
   }
 
   /* ---------- MINIMAL LOESS ------------------------------------------ */
   List<double> _loess(List<double> x, List<double> y,
       {double window = .1, int iters = 2}) {
-    final n = x.length;
-    final wSize = max(3, (window * n).round());
-    var yHat = List<double>.from(y);
+    try {
+      final n = x.length;
+      if (n < 3)
+        return List<double>.from(y); // Return original if too few points
 
-    // Optimize: pre-compute distances between points
-    final distances =
-        List.generate(n, (i) => List.generate(n, (j) => (x[i] - x[j]).abs()));
+      // Calculate window size - at least 3 points, at most n points
+      final wSize = max(3, min(n, (window * n).round()));
 
-    for (var iter = 0; iter < iters; iter++) {
-      final res = List<double>.filled(n, 0);
+      // Start with original values
+      var yHat = List<double>.from(y);
 
-      for (var i = 0; i < n; i++) {
-        // Find nearest neighbors more efficiently
-        final dists = distances[i];
-        final indices = List.generate(n, (j) => j);
-        indices.sort((a, b) => dists[a].compareTo(dists[b]));
-        final nn = indices.take(wSize).toList();
+      // Optimize: pre-compute distances between points
+      final distances =
+          List.generate(n, (i) => List.generate(n, (j) => (x[i] - x[j]).abs()));
 
-        // Tricube weights
-        final dMax = nn.map((j) => dists[j]).reduce(max);
-        final w = [
-          for (final j in nn) pow(1 - pow((dists[j] / dMax), 3), 3).toDouble()
-        ];
+      // Run multiple iterations of LOESS for robustness
+      for (var iter = 0; iter < iters; iter++) {
+        final res = List<double>.filled(n, 0); // Store residuals
 
-        // X-Matrix: [1, dx, dx²]
-        final List<List<double>> X = [
-          for (final j in nn)
-            [
-              1.0,
-              (x[j] - x[i]),
-              pow(x[j] - x[i], 2).toDouble(),
-            ]
-        ];
+        // For each point, fit a local polynomial
+        for (var i = 0; i < n; i++) {
+          try {
+            // Get distances from current point to all others
+            final dists = distances[i];
 
-        // X^T
-        final List<List<double>> XT = List.generate(
-          3,
-          (k) => [for (final row in X) row[k]],
-        );
+            // Find indices of nearest neighbors
+            final indices = List.generate(n, (j) => j);
+            indices.sort((a, b) => dists[a].compareTo(dists[b]));
+            final nn = indices.take(wSize).toList();
 
-        // diag(W)
-        final List<List<double>> W = List.generate(
-          wSize,
-          (r) => List.generate(wSize, (c) => r == c ? w[r] : 0.0),
-        );
+            // Calculate max distance in this neighborhood
+            double dMax = nn.map((j) => dists[j]).reduce(max);
+            if (dMax <= 0) dMax = 1.0; // Avoid division by zero
 
-        final XT_W = _matMul(XT, W);
+            // Compute tricube weights: w(x) = (1 - (d/dMax)³)³
+            final w = [
+              for (final j in nn)
+                dists[j] >= dMax
+                    ? 0.0
+                    : pow(1 - pow((dists[j] / dMax), 3), 3).toDouble()
+            ];
 
-        final beta = _solve(
-          _matMul(XT_W, X),
-          _matVec(XT_W, [for (final j in nn) y[j]]),
-        );
+            // Check if weights are valid
+            if (w.every((weight) => weight == 0)) {
+              // All weights are zero, skip this point
+              continue;
+            }
 
-        yHat[i] = beta[0]; // since (x - xi) = 0
-        res[i] = (y[i] - yHat[i]).abs();
+            // Create design matrix X with columns [1, dx, dx²]
+            final List<List<double>> X = [
+              for (final j in nn)
+                [
+                  1.0, // Constant term
+                  (x[j] - x[i]), // Linear term
+                  pow(x[j] - x[i], 2).toDouble(), // Quadratic term
+                ]
+            ];
+
+            // Compute X transpose
+            final List<List<double>> XT = List.generate(
+              3,
+              (k) => [for (final row in X) row[k]],
+            );
+
+            // Create diagonal weight matrix
+            final List<List<double>> W = List.generate(
+              wSize,
+              (r) => List.generate(wSize, (c) => r == c ? w[r] : 0.0),
+            );
+
+            // Matrix calculations for weighted least squares
+            final XT_W = _matMul(XT, W);
+            final XTW_X = _matMul(XT_W, X);
+            final XTW_y = _matVec(XT_W, [for (final j in nn) y[j]]);
+
+            // Solve for coefficients
+            final beta = _solve(XTW_X, XTW_y);
+
+            // Predict at the current point (since x[i] - x[i] = 0, only beta[0] matters)
+            yHat[i] = beta[0];
+
+            // Calculate absolute residual
+            res[i] = (y[i] - yHat[i]).abs();
+          } catch (e) {
+            // If calculation fails for this point, keep original value
+            // and continue with next point
+            yHat[i] = y[i];
+          }
+        }
       }
 
-      // Early stopping for convergence
-      if (res.reduce((a, b) => a + b) / n < 1e-6) break;
+      return yHat;
+    } catch (e) {
+      // Return original data if anything goes wrong
+      return List<double>.from(y);
     }
-
-    return yHat;
   }
 
   /* ---------- LINEAR-ALGEBRA HELPERS ---------------------------------- */
@@ -564,6 +662,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  AppBar _buildAppBar() {
+    return AppBar(
+      title: const Text('TrackIN'),
+      actions: [
+        // Load GPX file button
+        IconButton(
+          icon: const Icon(Icons.folder_open),
+          tooltip: 'Load GPX file',
+          onPressed: !_tracking ? _loadGpxFile : null,
+        ),
+        // Track info button (visible when track is loaded)
+        if (_isLoadedTrack)
+          IconButton(
+            icon: const Icon(Icons.info),
+            tooltip: 'Track Info',
+            onPressed: () => _showTrackInfoDialog(context),
+          ),
+        // Smoothing filter selection
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.tune),
+          tooltip: 'Change smoothing algorithm',
+          onSelected: (value) => setState(() => _selFilter = value),
+          itemBuilder: (context) => _filterNames
+              .map((f) => PopupMenuItem(value: f, child: Text(f)))
+              .toList(),
+        ),
+        // Help/about button
+        IconButton(
+          icon: const Icon(Icons.help_outline),
+          tooltip: 'Help',
+          onPressed: () => _showInfoDialog(context),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMeasurementsList() {
     if (_meas.isEmpty) {
       return const Center(
@@ -614,11 +748,198 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /* ---------- GPX LOADING FUNCTIONALITY -------------------------------- */
+
+  Future<void> _loadGpxFile() async {
+    try {
+      // Show loading indicator
+      setState(() => _status = 'Selecting GPX file...');
+
+      // Open file picker to select GPX file
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['gpx'],
+      );
+
+      if (result == null || result.files.isEmpty) {
+        setState(() => _status = 'File selection canceled');
+        return;
+      }
+
+      // Get the file path
+      String? filePath = result.files.single.path;
+      if (filePath == null) {
+        setState(() => _status = 'Could not get file path');
+        return;
+      }
+
+      // Read the file contents
+      setState(() => _status = 'Reading GPX file...');
+      final file = File(filePath);
+      final contents = await file.readAsString();
+
+      // Parse GPX data
+      setState(() => _status = 'Parsing GPX data...');
+      final parsedMeasurements = _parseGpxData(contents);
+
+      if (parsedMeasurements.isEmpty) {
+        setState(() => _status = 'No valid data found in GPX file');
+        return;
+      }
+
+      // Create a TrackFile object
+      final trackName = result.files.single.name;
+      final firstPoint = parsedMeasurements.first;
+
+      final loadedTrack = TrackFile(
+        name: trackName,
+        date: firstPoint.t,
+        pointCount: parsedMeasurements.length,
+        measurements: parsedMeasurements,
+      );
+
+      // Update state with loaded data
+      setState(() {
+        _isLoadedTrack = true;
+        _loadedTrack = loadedTrack;
+        _meas.clear();
+        _meas.addAll(parsedMeasurements);
+        _status = 'Loaded ${parsedMeasurements.length} points from $trackName';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error loading GPX file: $e');
+    }
+  }
+
+  List<Measurement> _parseGpxData(String gpxContent) {
+    try {
+      final measurements = <Measurement>[];
+
+      // Parse XML
+      final document = xml.XmlDocument.parse(gpxContent);
+
+      // Find track points
+      final trackPoints = document.findAllElements('trkpt');
+
+      for (final point in trackPoints) {
+        try {
+          // Get latitude and longitude
+          final lat = double.parse(point.getAttribute('lat') ?? '0');
+          final lon = double.parse(point.getAttribute('lon') ?? '0');
+
+          // Get elevation (altitude)
+          final eleElement = point.findElements('ele').firstOrNull;
+          final elevation =
+              eleElement != null ? double.parse(eleElement.innerText) : 0.0;
+
+          // Get time
+          final timeElement = point.findElements('time').firstOrNull;
+          final timeString = timeElement?.innerText ?? '';
+          final time = timeString.isNotEmpty
+              ? DateTime.parse(timeString)
+              : DateTime.now();
+
+          // Check for barometric altitude in extensions
+          double? baroAlt;
+          final extensionsElement =
+              point.findElements('extensions').firstOrNull;
+          if (extensionsElement != null) {
+            final baroElement =
+                extensionsElement.findElements('baro:alt').firstOrNull;
+            if (baroElement != null) {
+              baroAlt = double.tryParse(baroElement.innerText);
+            }
+          }
+
+          // Create and add measurement
+          measurements.add(Measurement(time, lat, lon, elevation, baroAlt));
+        } catch (e) {
+          // Skip invalid points
+          continue;
+        }
+      }
+
+      return measurements;
+    } catch (e) {
+      // Return empty list on parsing error
+      return [];
+    }
+  }
+
+  void _showTrackInfoDialog(BuildContext context) {
+    if (_loadedTrack == null) return;
+
+    // Calculate some stats
+    final track = _loadedTrack!;
+    final distances = _distances();
+    final totalDistance = distances.isEmpty ? 0.0 : distances.last;
+    final elevations = track.measurements.map((m) => m.gpsAlt).toList();
+    final minElevation = elevations.reduce(min);
+    final maxElevation = elevations.reduce(max);
+    final elevationGain = _calculateElevationGain(elevations);
+
+    final startTime = track.measurements.first.t;
+    final endTime = track.measurements.last.t;
+    final duration = endTime.difference(startTime);
+
+    // Format duration
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes % 60;
+    final seconds = duration.inSeconds % 60;
+    final durationString =
+        '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Track: ${track.name}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                  'Date: ${DateFormat('dd.MM.yyyy - HH:mm').format(track.date)}'),
+              const SizedBox(height: 8),
+              Text('Points: ${track.pointCount}'),
+              Text('Distance: ${totalDistance.toStringAsFixed(2)} km'),
+              Text('Duration: $durationString'),
+              const SizedBox(height: 8),
+              Text('Min Elevation: ${minElevation.toStringAsFixed(1)} m'),
+              Text('Max Elevation: ${maxElevation.toStringAsFixed(1)} m'),
+              Text(
+                  'Elevation Range: ${(maxElevation - minElevation).toStringAsFixed(1)} m'),
+              Text('Total Ascent: ${elevationGain.toStringAsFixed(1)} m'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _calculateElevationGain(List<double> elevations) {
+    if (elevations.length <= 1) return 0;
+
+    double totalGain = 0;
+    for (int i = 1; i < elevations.length; i++) {
+      final diff = elevations[i] - elevations[i - 1];
+      if (diff > 0) totalGain += diff;
+    }
+
+    return totalGain;
+  }
+
   void _showInfoDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('About Altitude Tracker'),
+        title: const Text('About TrackIN'),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -633,7 +954,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Text(
                   'Your data is stored only on your device and can be shared as a GPX file.'),
               SizedBox(height: 16),
-              Text('Altitude Tracker v1.1.0'),
+              Text('TrackIN v1.1.0'),
             ],
           ),
         ),
@@ -655,26 +976,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final altSm = _applyFilter(dist, altRaw);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Altitude Tracker'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () => _showInfoDialog(context),
-          ),
-          PopupMenuButton<String>(
-            icon: const Icon(Icons.tune),
-            onSelected: (value) => setState(() => _selFilter = value),
-            itemBuilder: (context) => _filterNames
-                .map((f) => PopupMenuItem(value: f, child: Text(f)))
-                .toList(),
-          ),
-        ],
-      ),
+      appBar: _buildAppBar(),
       body: SafeArea(
         child: Column(
           children: [
-            // Current status card
+            // Current status/file info card
             Card(
               margin: const EdgeInsets.all(12),
               child: Padding(
@@ -685,18 +991,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Current Status',
-                            style: Theme.of(context).textTheme.titleMedium),
-                        _buildStatusIndicator(),
+                        _isLoadedTrack
+                            ? Text(
+                                'Loaded Track: ${_loadedTrack?.name ?? "Unknown"}',
+                                style: Theme.of(context).textTheme.titleMedium)
+                            : Text('Current Status',
+                                style: Theme.of(context).textTheme.titleMedium),
+                        _tracking ? _buildStatusIndicator() : Container(),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(_status,
                         style: TextStyle(
-                          color: _tracking ? Colors.green : Colors.grey,
+                          color: _tracking
+                              ? Colors.green
+                              : _isLoadedTrack
+                                  ? Colors.blue
+                                  : Colors.grey,
                         )),
                     const Divider(),
-                    _buildCoordinatesDisplay(),
+                    _isLoadedTrack
+                        ? _buildTrackSummary()
+                        : _buildCoordinatesDisplay(),
                   ],
                 ),
               ),
@@ -709,7 +1025,48 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 margin: const EdgeInsets.symmetric(horizontal: 12),
                 child: Padding(
                   padding: const EdgeInsets.all(8),
-                  child: _buildChart(dist, altRaw, altSm),
+                  child: Column(
+                    children: [
+                      // Graph visibility controls
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            // Raw data toggle
+                            Row(
+                              children: [
+                                Checkbox(
+                                  value: _showRaw,
+                                  onChanged: (val) {
+                                    setState(() => _showRaw = val ?? true);
+                                  },
+                                ),
+                                const Text('Raw Data'),
+                              ],
+                            ),
+                            const SizedBox(width: 16),
+                            // Smoothed data toggle
+                            Row(
+                              children: [
+                                Checkbox(
+                                  value: _showSmoothed,
+                                  onChanged: (val) {
+                                    setState(() => _showSmoothed = val ?? true);
+                                  },
+                                ),
+                                const Text('Smoothed'),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      // The chart
+                      Expanded(
+                        child: _buildChart(dist, altRaw, altSm),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -725,25 +1082,68 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ],
         ),
       ),
-      bottomNavigationBar: BottomAppBar(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _tracking ? null : _start,
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Start'),
-              ),
+      bottomNavigationBar: _buildBottomAppBar(),
+    );
+  }
+
+  Widget _buildTrackSummary() {
+    if (_loadedTrack == null) return Container();
+
+    final distances = _distances();
+    final totalDistance = distances.isEmpty ? 0.0 : distances.last;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Points: ${_loadedTrack!.pointCount}'),
+        Text('Distance: ${totalDistance.toStringAsFixed(2)} km'),
+        Text(
+            'Date: ${DateFormat('dd.MM.yyyy - HH:mm').format(_loadedTrack!.date)}'),
+      ],
+    );
+  }
+
+  Widget _buildBottomAppBar() {
+    return BottomAppBar(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Start tracking button - disabled during tracking or when viewing a loaded file
+            ElevatedButton.icon(
+              onPressed: (!_tracking && !_isLoadedTrack) ? _start : null,
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Start'),
+            ),
+            const SizedBox(width: 16),
+            // Stop & Save button - only enabled during tracking
+            ElevatedButton.icon(
+              onPressed: _tracking ? _stopAndSave : null,
+              icon: const Icon(Icons.stop),
+              label: const Text('Stop & Save'),
+            ),
+            // Clear loaded track button - only visible when a track is loaded
+            if (_isLoadedTrack) ...[
               const SizedBox(width: 16),
               ElevatedButton.icon(
-                onPressed: _tracking ? _stopAndSave : null,
-                icon: const Icon(Icons.stop),
-                label: const Text('Stop & Save'),
+                onPressed: () {
+                  setState(() {
+                    _isLoadedTrack = false;
+                    _loadedTrack = null;
+                    _meas.clear();
+                    _status = 'Ready';
+                  });
+                },
+                icon: const Icon(Icons.clear),
+                label: const Text('Clear'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade100,
+                  foregroundColor: Colors.red.shade700,
+                ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -760,94 +1160,140 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final minY = (raw.isEmpty ? 0 : raw.reduce(min)).toDouble() - 10;
     final maxY = (raw.isEmpty ? 100 : raw.reduce(max)).toDouble() + 10;
 
+    // Create the line bars data based on visibility settings
+    final lineBarsData = <LineChartBarData>[];
+
+    // Add raw data line if visible
+    if (_showRaw) {
+      lineBarsData.add(_line(raw, x, Colors.blue, false, 'Raw'));
+    }
+
+    // Add smoothed data line if visible
+    if (_showSmoothed) {
+      lineBarsData
+          .add(_line(sm, x, Colors.orange, true, 'Smoothed ($_selFilter)'));
+    }
+
+    // Chart legend
+    final legend = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (_showRaw) ...[
+          Container(
+            width: 16,
+            height: 3,
+            color: Colors.blue,
+          ),
+          const SizedBox(width: 5),
+          const Text('Raw'),
+          const SizedBox(width: 20),
+        ],
+        if (_showSmoothed) ...[
+          Container(
+            width: 16,
+            height: 3,
+            color: Colors.orange,
+          ),
+          const SizedBox(width: 5),
+          Text('Smoothed ($_selFilter)'),
+        ],
+      ],
+    );
+
     return Padding(
       padding: const EdgeInsets.all(12),
-      child: LineChart(
-        LineChartData(
-          minX: 0,
-          maxX: x.isEmpty ? 1 : x.last,
-          minY: minY,
-          maxY: maxY,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: true,
-            drawHorizontalLine: true,
-          ),
-          lineTouchData: LineTouchData(
-            enabled: true,
-            touchTooltipData: LineTouchTooltipData(
-              tooltipBgColor:
-                  Theme.of(context).colorScheme.surface.withOpacity(0.8),
-              getTooltipItems: (spots) {
-                return spots.map((spot) {
-                  return LineTooltipItem(
-                    '${spot.y.toStringAsFixed(1)} m\n${spot.x.toStringAsFixed(2)} km',
-                    TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontWeight: FontWeight.bold,
+      child: Column(
+        children: [
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minX: 0,
+                maxX: x.isEmpty ? 1 : x.last,
+                minY: minY,
+                maxY: maxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: true,
+                  drawHorizontalLine: true,
+                ),
+                lineTouchData: LineTouchData(
+                  enabled: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipBgColor:
+                        Theme.of(context).colorScheme.surface.withOpacity(0.8),
+                    getTooltipItems: (spots) {
+                      return spots.map((spot) {
+                        return LineTooltipItem(
+                          '${spot.y.toStringAsFixed(1)} m\n${spot.x.toStringAsFixed(2)} km',
+                          TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 30,
+                      getTitlesWidget: (value, meta) {
+                        return SideTitleWidget(
+                          axisSide: meta.axisSide,
+                          child: Text(
+                            value.toStringAsFixed(1),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                }).toList();
-              },
-            ),
-          ),
-          titlesData: FlTitlesData(
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 30,
-                getTitlesWidget: (value, meta) {
-                  return SideTitleWidget(
-                    axisSide: meta.axisSide,
-                    child: Text(
-                      value.toStringAsFixed(1),
-                      style: const TextStyle(fontSize: 10),
+                    axisNameWidget: const Text('Distance (km)'),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 40,
+                      getTitlesWidget: (value, meta) {
+                        return SideTitleWidget(
+                          axisSide: meta.axisSide,
+                          child: Text(
+                            value.toStringAsFixed(0),
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                    axisNameWidget: const Text('Altitude (m)'),
+                  ),
+                  topTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                  rightTitles: const AxisTitles(
+                    sideTitles: SideTitles(showTitles: false),
+                  ),
+                ),
+                lineBarsData: lineBarsData,
+                borderData: FlBorderData(
+                  show: true,
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outline,
+                    width: 1,
+                  ),
+                ),
               ),
-              axisNameWidget: const Text('Distance (km)'),
-            ),
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 40,
-                getTitlesWidget: (value, meta) {
-                  return SideTitleWidget(
-                    axisSide: meta.axisSide,
-                    child: Text(
-                      value.toStringAsFixed(0),
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  );
-                },
-              ),
-              axisNameWidget: const Text('Altitude (m)'),
-            ),
-            topTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
-            ),
-            rightTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
             ),
           ),
-          lineBarsData: [
-            _line(raw, x, Colors.blue, false),
-            _line(sm, x, Colors.orange, true),
-          ],
-          borderData: FlBorderData(
-            show: true,
-            border: Border.all(
-              color: Theme.of(context).colorScheme.outline,
-              width: 1,
-            ),
-          ),
-        ),
+          const SizedBox(height: 10),
+          legend, // Display the legend at the bottom
+        ],
       ),
     );
   }
 
-  LineChartBarData _line(List<double> y, List<double> x, Color c, bool dash) =>
+  LineChartBarData _line(
+          List<double> y, List<double> x, Color c, bool dash, String title) =>
       LineChartBarData(
         spots: [
           for (var i = 0; i < y.length; i++) FlSpot(x[i], y[i]),

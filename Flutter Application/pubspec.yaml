@@ -11,13 +11,24 @@ dependencies:
   geolocator: ^10.0.1
   flutter_barometer: ^0.1.0
   path_provider: ^2.1.2
-  share_plus: ^7.2.0          # Files teilen  [oai_citation:0‡Dart packages](https://pub.dev/packages/share_plus?utm_source=chatgpt.com)
-  fl_chart: ^0.66.2           # Distance-Altitude-Diagramm
-  equations: ^5.0.0           # Cubic spline  [oai_citation:1‡Dart packages](https://pub.dev/documentation/equations/latest/equations/SplineInterpolation-class.html?utm_source=chatgpt.com)
+  share_plus: ^7.2.0          
+  fl_chart: ^0.66.2           
+  equations: ^5.0.0           
+  xml: ^6.3.0                 # Für XML-Parsing
+  file_picker: ^5.3.3         # Für Dateiauswahl
+  intl: ^0.18.1               # Für Datums- und Zahlenformatierung  
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "Flutter Application/trackin_icon_v1.png"
+  adaptive_icon_background: "#FFFFFF" # Optional, für Android adaptive icons
+  adaptive_icon_foreground: "Flutter Application/trackin_icon_v1.png" # Optional
