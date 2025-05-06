@@ -25,10 +25,62 @@ class Measurement {
 
 class TrackingApp extends StatelessWidget {
   const TrackingApp({super.key});
+
   @override
   Widget build(BuildContext ctx) => MaterialApp(
-        title: 'Tracking App',
-        theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.blue),
+        title: 'Altitude Tracker',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.blue,
+            brightness: Brightness.light,
+          ),
+          appBarTheme: const AppBarTheme(
+            centerTitle: true,
+            elevation: 2,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(120, 45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          cardTheme: CardTheme(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.blue,
+            brightness: Brightness.dark,
+          ),
+          appBarTheme: const AppBarTheme(
+            centerTitle: true,
+            elevation: 2,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(120, 45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          cardTheme: CardTheme(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        themeMode: ThemeMode.system,
         home: const HomePage(),
       );
 }
@@ -41,7 +93,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /* ---------- STATE --------------------------------------------------- */
   final _meas = <Measurement>[];
   final _scroll = ScrollController();
@@ -49,22 +101,128 @@ class _HomePageState extends State<HomePage> {
   Timer? _gpsTimer;
   StreamSubscription? _baroSub;
   bool _tracking = false;
-  String _status = 'Bereit';
+  String _status = 'Ready';
+  Position? _currentPosition;
+  final _maxPoints = 1000; // Maximum points to store for memory optimization
 
   /* ---------- LIFECYCLE ---------------------------------------------- */
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _checkLocationPermission();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Handle app lifecycle changes to properly manage resources
+    if (state == AppLifecycleState.paused) {
+      // App goes to background
+      _pauseTracking();
+    } else if (state == AppLifecycleState.resumed) {
+      // App comes to foreground
+      if (_tracking) {
+        _resumeTracking();
+      }
+    }
+  }
+
   @override
   void dispose() {
     _gpsTimer?.cancel();
     _baroSub?.cancel();
     _scroll.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /* ---------- PERMISSION HANDLING ------------------------------------- */
+  Future<void> _checkLocationPermission() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      setState(() => _status = 'Location services disabled');
+      _showLocationDialog();
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        setState(() => _status = 'Location permission denied');
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() => _status = 'Location permissions permanently denied');
+      _showPermissionSettingsDialog();
+      return;
+    }
+
+    // Ready to track
+    setState(() => _status = 'Ready to track');
+    // Get position once to show initial coordinates
+    _capturePosition();
+  }
+
+  void _showLocationDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Location Services Required'),
+        content: const Text(
+            'This app needs location services to track your position and altitude. '
+            'Please enable location services in your device settings.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Geolocator.openLocationSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPermissionSettingsDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Location Permission Required'),
+        content: const Text(
+            'This app needs location permission to track your position and altitude. '
+            'Please enable location permission in your device settings.'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Geolocator.openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
   }
 
   /* ---------- TRACKING ------------------------------------------------ */
   void _start() {
     setState(() {
       _tracking = true;
-      _status = 'Tracking läuft …';
+      _status = 'Tracking in progress...';
       _meas.clear();
     });
 
@@ -73,22 +231,48 @@ class _HomePageState extends State<HomePage> {
 
     _baroSub = flutterBarometerEvents.listen((e) {
       const p0 = 1013.25;
-      final alt =
-          (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble(); // num→double
+      final alt = (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble();
       setState(() => _baroAlt = alt);
     });
+  }
+
+  void _pauseTracking() {
+    _gpsTimer?.cancel();
+    _baroSub?.cancel();
+    setState(() => _status = 'Tracking paused');
+  }
+
+  void _resumeTracking() {
+    _gpsTimer =
+        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
+
+    _baroSub = flutterBarometerEvents.listen((e) {
+      const p0 = 1013.25;
+      final alt = (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble();
+      setState(() => _baroAlt = alt);
+    });
+
+    setState(() => _status = 'Tracking resumed');
   }
 
   Future<void> _capturePosition() async {
     try {
       final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.best);
+
       setState(() {
+        _currentPosition = pos;
         _meas.add(Measurement(DateTime.now(), pos.latitude, pos.longitude,
             pos.altitude, _baroAlt));
-        _status =
-            'Fix: ${pos.latitude.toStringAsFixed(6)}, ${pos.longitude.toStringAsFixed(6)}';
+
+        // Memory optimization: limit the number of points stored
+        if (_meas.length > _maxPoints) {
+          _meas.removeAt(0);
+        }
+
+        _status = 'Location updated';
       });
+
       if (_scroll.hasClients) {
         _scroll.animateTo(
           _scroll.position.maxScrollExtent + 72,
@@ -96,19 +280,48 @@ class _HomePageState extends State<HomePage> {
           curve: Curves.easeOut,
         );
       }
-      _scroll.animateTo(_scroll.position.maxScrollExtent + 72,
-          duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
     } on Exception catch (e) {
-      setState(() => _status = 'GPS-Fehler: $e');
+      setState(() => _status = 'GPS error: $e');
     }
   }
 
   Future<void> _stopAndSave() async {
     _gpsTimer?.cancel();
     _baroSub?.cancel();
-    setState(() => _tracking = false);
+    setState(() {
+      _tracking = false;
+      _status = 'Tracking stopped';
+    });
+
+    if (_meas.isEmpty) {
+      _showNoDataDialog();
+      return;
+    }
+
     final file = await _writeGPX();
-    await Share.shareXFiles([XFile(file.path)], subject: 'GPX-Export');
+
+    // Show share dialog
+    await Share.shareXFiles(
+      [XFile(file.path)],
+      subject: 'Altitude Tracking Data (${_meas.length} points)',
+      text: 'Exported on ${DateTime.now().toLocal()}',
+    );
+  }
+
+  void _showNoDataDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No Data'),
+        content: const Text('No tracking data available to export.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   /* ---------- GPX EXPORT --------------------------------------------- */
@@ -116,30 +329,48 @@ class _HomePageState extends State<HomePage> {
     final buf = StringBuffer()
       ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
       ..writeln(
-          '<gpx version="1.1" creator="tracking_app" xmlns="http://www.topografix.com/GPX/1/1">')
-      ..writeln('<metadata><copyright author="THI SS25"/></metadata>')
+          '<gpx version="1.1" creator="Altitude Tracker" xmlns="http://www.topografix.com/GPX/1/1">')
+      ..writeln('<metadata>')
+      ..writeln('  <name>Altitude Tracking Data</name>')
+      ..writeln('  <time>${DateTime.now().toUtc().toIso8601String()}</time>')
+      ..writeln('  <copyright author="AltitudeTracker"/>')
+      ..writeln('</metadata>')
       ..writeln('<trk><name>${_fileStamp()}</name><trkseg>');
+
+    // Add track points
     for (final m in _meas) {
       buf
         ..writeln('<trkpt lat="${m.lat}" lon="${m.lon}">')
         ..writeln('<ele>${m.gpsAlt.toStringAsFixed(1)}</ele>')
-        ..writeln('<time>${m.t.toUtc().toIso8601String()}</time>')
-        ..writeln('</trkpt>');
+        ..writeln('<time>${m.t.toUtc().toIso8601String()}</time>');
+
+      // Add barometric altitude as extension if available
+      if (m.baroAlt != null) {
+        buf
+          ..writeln('<extensions>')
+          ..writeln('<baro:alt>${m.baroAlt!.toStringAsFixed(1)}</baro:alt>')
+          ..writeln('</extensions>');
+      }
+
+      buf..writeln('</trkpt>');
     }
+
     buf..writeln('</trkseg></trk></gpx>');
+
+    // Save file
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/${_fileStamp()}.gpx');
+
     return file.writeAsString(buf.toString()).then((f) {
-      setState(() => _status = 'Gespeichert: ${f.path}');
+      setState(() => _status = 'Saved: ${file.path}');
       return f;
     });
   }
 
   String _fileStamp() =>
-      DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-');
+      'AltitudeTrack_${DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}';
 
   /* ---------- DISTANCES ---------------------------------------------- */
-
   List<double> _distances() {
     double cum = 0;
     final list = <double>[0];
@@ -164,13 +395,13 @@ class _HomePageState extends State<HomePage> {
   double _deg(double d) => d * pi / 180;
 
   /* ---------- SMOOTHING ---------------------------------------------- */
-
   final _filterNames = ['Raw', 'Spline', 'LOESS'];
   String _selFilter = 'Raw';
 
   List<double> _applyFilter(List<double> x, List<double> y) {
-    // Safety: zu wenig Daten oder nicht-steigend? -> Rohdaten zurückgeben
+    // Safety: too few data or non-increasing? -> Return raw data
     if (x.length < 3 || x.toSet().length != x.length) return y;
+
     switch (_selFilter) {
       case 'Spline':
         final nodes = <InterpolationNode>[];
@@ -181,37 +412,43 @@ class _HomePageState extends State<HomePage> {
         }
         final spline = SplineInterpolation(nodes: nodes);
         return x.map(spline.compute).toList();
+
       case 'LOESS':
         return _loess(x, y, window: .15, iters: 2);
+
       default:
         return y;
     }
   }
 
   /* ---------- MINIMAL LOESS ------------------------------------------ */
-
   List<double> _loess(List<double> x, List<double> y,
       {double window = .1, int iters = 2}) {
     final n = x.length;
     final wSize = max(3, (window * n).round());
     var yHat = List<double>.from(y);
 
+    // Optimize: pre-compute distances between points
+    final distances =
+        List.generate(n, (i) => List.generate(n, (j) => (x[i] - x[j]).abs()));
+
     for (var iter = 0; iter < iters; iter++) {
       final res = List<double>.filled(n, 0);
-      for (var i = 0; i < n; i++) {
-        // ---- k-nächste Nachbarn nach |x-xi|
-        final idx = List<int>.generate(n, (j) => j)
-          ..sort((a, b) => (x[a] - x[i]).abs().compareTo((x[b] - x[i]).abs()));
-        final nn = idx.take(wSize).toList();
 
-        // ---- Tricube-Gewichte
-        final dMax = nn.map((j) => (x[j] - x[i]).abs()).reduce(max);
+      for (var i = 0; i < n; i++) {
+        // Find nearest neighbors more efficiently
+        final dists = distances[i];
+        final indices = List.generate(n, (j) => j);
+        indices.sort((a, b) => dists[a].compareTo(dists[b]));
+        final nn = indices.take(wSize).toList();
+
+        // Tricube weights
+        final dMax = nn.map((j) => dists[j]).reduce(max);
         final w = [
-          for (final j in nn)
-            pow(1 - pow(((x[j] - x[i]).abs() / dMax), 3), 3).toDouble()
+          for (final j in nn) pow(1 - pow((dists[j] / dMax), 3), 3).toDouble()
         ];
 
-        // ---- X-Matrix: [1, dx, dx²]
+        // X-Matrix: [1, dx, dx²]
         final List<List<double>> X = [
           for (final j in nn)
             [
@@ -221,13 +458,13 @@ class _HomePageState extends State<HomePage> {
             ]
         ];
 
-        // ---- X^T
+        // X^T
         final List<List<double>> XT = List.generate(
           3,
           (k) => [for (final row in X) row[k]],
         );
 
-        // ---- diag(W)
+        // diag(W)
         final List<List<double>> W = List.generate(
           wSize,
           (r) => List.generate(wSize, (c) => r == c ? w[r] : 0.0),
@@ -240,16 +477,18 @@ class _HomePageState extends State<HomePage> {
           _matVec(XT_W, [for (final j in nn) y[j]]),
         );
 
-        yHat[i] = beta[0]; // da (x - xi) = 0
+        yHat[i] = beta[0]; // since (x - xi) = 0
         res[i] = (y[i] - yHat[i]).abs();
       }
-      if (res.reduce((a, b) => a + b) / n < 1e-6) break; // trivialer Stopp
+
+      // Early stopping for convergence
+      if (res.reduce((a, b) => a + b) / n < 1e-6) break;
     }
+
     return yHat;
   }
 
   /* ---------- LINEAR-ALGEBRA HELPERS ---------------------------------- */
-
   List<List<double>> _matMul(List<List<double>> A, List<List<double>> B) {
     final m = A.length, n = B[0].length, k = B.length;
     return List.generate(
@@ -286,8 +525,129 @@ class _HomePageState extends State<HomePage> {
     return [dx / d, dy / d, dz / d];
   }
 
-  /* ======================== UI ======================================= */
+  /* ---------- UI HELPER WIDGETS -------------------------------------- */
+  Widget _buildStatusIndicator() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: _tracking ? Colors.green : Colors.red,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
 
+  Widget _buildCoordinatesDisplay() {
+    if (_currentPosition == null) {
+      return const Text('No location data available');
+    }
+
+    final pos = _currentPosition!;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Latitude: ${pos.latitude.toStringAsFixed(6)}°'),
+        Text('Longitude: ${pos.longitude.toStringAsFixed(6)}°'),
+        Row(
+          children: [
+            Expanded(
+              child: Text('GPS Alt: ${pos.altitude.toStringAsFixed(1)} m'),
+            ),
+            if (_baroAlt != null)
+              Expanded(
+                child: Text('Baro Alt: ${_baroAlt!.toStringAsFixed(1)} m'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMeasurementsList() {
+    if (_meas.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: Text('No measurements yet',
+              style: TextStyle(fontStyle: FontStyle.italic)),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text(
+            'Tracking Data (${_meas.length} points)',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            controller: _scroll,
+            itemCount: _meas.length,
+            itemBuilder: (_, i) {
+              final m = _meas[i];
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  child: Text('${i + 1}'),
+                ),
+                title: Text(
+                    '${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}'),
+                subtitle: Text(
+                    'Alt: ${m.gpsAlt.toStringAsFixed(1)}m | Baro: ${m.baroAlt?.toStringAsFixed(1) ?? 'n/a'}m'),
+                trailing: Text(
+                  TimeOfDay.fromDateTime(m.t).format(context),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showInfoDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('About Altitude Tracker'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                  'This app tracks your location and altitude using GPS and barometric sensors.'),
+              SizedBox(height: 8),
+              Text('• Tap START to begin tracking'),
+              Text('• Tap STOP & SAVE to export as GPX'),
+              SizedBox(height: 8),
+              Text(
+                  'Your data is stored only on your device and can be shared as a GPX file.'),
+              SizedBox(height: 16),
+              Text('Altitude Tracker v1.1.0'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /* ======================== UI ======================================= */
   @override
   Widget build(BuildContext ctx) {
     final dist = _distances();
@@ -296,88 +656,192 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tracking App'),
+        title: const Text('Altitude Tracker'),
         actions: [
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _selFilter,
-              items: _filterNames
-                  .map((f) => DropdownMenuItem(value: f, child: Text(f)))
-                  .toList(),
-              onChanged: (v) => setState(() => _selFilter = v!),
-            ),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            onPressed: () => _showInfoDialog(context),
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.tune),
+            onSelected: (value) => setState(() => _selFilter = value),
+            itemBuilder: (context) => _filterNames
+                .map((f) => PopupMenuItem(value: f, child: Text(f)))
+                .toList(),
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(child: _buildChart(dist, altRaw, altSm)),
-          const Divider(height: 1),
-          Expanded(
-            child: Scrollbar(
-              thumbVisibility: true,
-              controller: _scroll,
-              child: ListView.separated(
-                controller: _scroll,
-                itemCount: _meas.length,
-                separatorBuilder: (_, __) => const Divider(height: .5),
-                itemBuilder: (_, i) => _MeasurementTile(m: _meas[i]),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Current status card
+            Card(
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Current Status',
+                            style: Theme.of(context).textTheme.titleMedium),
+                        _buildStatusIndicator(),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_status,
+                        style: TextStyle(
+                          color: _tracking ? Colors.green : Colors.grey,
+                        )),
+                    const Divider(),
+                    _buildCoordinatesDisplay(),
+                  ],
+                ),
               ),
             ),
-          ),
-          Text(_status),
-          const SizedBox(height: 4),
-        ],
-      ),
-      bottomNavigationBar: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Row(
-          children: [
+
+            // Altitude graph
             Expanded(
-              child: ElevatedButton.icon(
+              flex: 2,
+              child: Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: _buildChart(dist, altRaw, altSm),
+                ),
+              ),
+            ),
+
+            // Tracking table
+            Expanded(
+              flex: 2,
+              child: Card(
+                margin: const EdgeInsets.all(12),
+                child: _buildMeasurementsList(),
+              ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: BottomAppBar(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              ElevatedButton.icon(
                 onPressed: _tracking ? null : _start,
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('Start'),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton.icon(
+              const SizedBox(width: 16),
+              ElevatedButton.icon(
                 onPressed: _tracking ? _stopAndSave : null,
                 icon: const Icon(Icons.stop),
-                label: const Text('Stop & GPX'),
+                label: const Text('Stop & Save'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   /* ---------------- CHART -------------------------------------------- */
-
   Widget _buildChart(List<double> x, List<double> raw, List<double> sm) {
-    if (x.length < 2) return const Center(child: Text('Noch keine Daten'));
+    if (x.length < 2) {
+      return const Center(
+        child: Text('No data available for chart'),
+      );
+    }
+
+    final minY = (raw.isEmpty ? 0 : raw.reduce(min)).toDouble() - 10;
+    final maxY = (raw.isEmpty ? 100 : raw.reduce(max)).toDouble() + 10;
+
     return Padding(
       padding: const EdgeInsets.all(12),
       child: LineChart(
         LineChartData(
           minX: 0,
-          maxX: x.last,
-          gridData: FlGridData(show: true),
-          lineTouchData: const LineTouchData(enabled: false),
+          maxX: x.isEmpty ? 1 : x.last,
+          minY: minY,
+          maxY: maxY,
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: true,
+            drawHorizontalLine: true,
+          ),
+          lineTouchData: LineTouchData(
+            enabled: true,
+            touchTooltipData: LineTouchTooltipData(
+              tooltipBgColor:
+                  Theme.of(context).colorScheme.surface.withOpacity(0.8),
+              getTooltipItems: (spots) {
+                return spots.map((spot) {
+                  return LineTooltipItem(
+                    '${spot.y.toStringAsFixed(1)} m\n${spot.x.toStringAsFixed(2)} km',
+                    TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  );
+                }).toList();
+              },
+            ),
+          ),
           titlesData: FlTitlesData(
-            leftTitles: AxisTitles(
-                sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
             bottomTitles: AxisTitles(
-                sideTitles: SideTitles(showTitles: true, reservedSize: 32)),
-            rightTitles: const AxisTitles(),
-            topTitles: const AxisTitles(),
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 30,
+                getTitlesWidget: (value, meta) {
+                  return SideTitleWidget(
+                    axisSide: meta.axisSide,
+                    child: Text(
+                      value.toStringAsFixed(1),
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  );
+                },
+              ),
+              axisNameWidget: const Text('Distance (km)'),
+            ),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 40,
+                getTitlesWidget: (value, meta) {
+                  return SideTitleWidget(
+                    axisSide: meta.axisSide,
+                    child: Text(
+                      value.toStringAsFixed(0),
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  );
+                },
+              ),
+              axisNameWidget: const Text('Altitude (m)'),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
           ),
           lineBarsData: [
             _line(raw, x, Colors.blue, false),
             _line(sm, x, Colors.orange, true),
           ],
+          borderData: FlBorderData(
+            show: true,
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline,
+              width: 1,
+            ),
+          ),
         ),
       ),
     );
@@ -386,29 +850,17 @@ class _HomePageState extends State<HomePage> {
   LineChartBarData _line(List<double> y, List<double> x, Color c, bool dash) =>
       LineChartBarData(
         spots: [
-          for (var i = 0; i < x.length; i++) FlSpot(x[i], y[i]),
+          for (var i = 0; i < y.length; i++) FlSpot(x[i], y[i]),
         ],
         isCurved: true,
         color: c,
-        barWidth: 2,
+        barWidth: 3,
+        isStrokeCapRound: true,
+        dotData: FlDotData(show: false),
         dashArray: dash ? [8, 4] : null,
-      );
-}
-
-/* ---------------- LIST-TILE ------------------------------------------- */
-
-class _MeasurementTile extends StatelessWidget {
-  final Measurement m;
-  const _MeasurementTile({required this.m});
-
-  @override
-  Widget build(BuildContext ctx) => ListTile(
-        title: Text('${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}'),
-        subtitle: Text('GPS ${m.gpsAlt.toStringAsFixed(1)} m | '
-            'Baro ${m.baroAlt?.toStringAsFixed(1) ?? 'n/a'} m'),
-        trailing: Text(
-          TimeOfDay.fromDateTime(m.t).format(ctx),
-          style: const TextStyle(fontSize: 12),
+        belowBarData: BarAreaData(
+          show: true,
+          color: c.withOpacity(0.2),
         ),
       );
 }
