@@ -1,18 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:convert';
 import 'package:xml/xml.dart' as xml;
 
 import 'package:equations/equations.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_barometer/flutter_barometer.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 
 void main() => runApp(const TrackingApp());
 
@@ -132,6 +132,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _requestLocationPermission();
     _checkLocationPermission();
   }
 
@@ -159,6 +160,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /* ---------- PERMISSION HANDLING ------------------------------------- */
+  Future<void> _requestLocationPermission() async {
+    PermissionStatus permission = await Permission.location.status;
+    if (!permission.isGranted) {
+      await Permission.location.request();
+    }
+  }
+
   Future<void> _checkLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -241,20 +249,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   /* ---------- TRACKING ------------------------------------------------ */
+
+  void _doTrack() {
+    _gpsTimer =
+        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
+
+    _baroSub = barometerEventStream(samplingPeriod: Duration(seconds: 1))
+        .listen((BarometerEvent e) {
+      const p0 = 1013.25;
+      final alt = (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble();
+      setState(() => _baroAlt = alt);
+    });
+  }
+
   void _start() {
+    _doTrack();
     setState(() {
       _tracking = true;
       _status = 'Tracking in progress...';
       _meas.clear();
-    });
-
-    _gpsTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
-
-    _baroSub = flutterBarometerEvents.listen((e) {
-      const p0 = 1013.25;
-      final alt = (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble();
-      setState(() => _baroAlt = alt);
     });
   }
 
@@ -265,15 +278,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _resumeTracking() {
-    _gpsTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
-
-    _baroSub = flutterBarometerEvents.listen((e) {
-      const p0 = 1013.25;
-      final alt = (44330 * (1 - pow(e.pressure / p0, 0.1903))).toDouble();
-      setState(() => _baroAlt = alt);
-    });
-
+    _doTrack();
     setState(() => _status = 'Tracking resumed');
   }
 
