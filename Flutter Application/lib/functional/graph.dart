@@ -258,57 +258,63 @@ class _TrackGraphState extends State<TrackGraph> {
           children: [
             // Graph visibility controls
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Raw data toggle
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: _showRaw,
-                        onChanged: (val) {
-                          setState(() => _showRaw = val ?? true);
-                        },
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Raw data toggle
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _showRaw,
+                                onChanged: (val) {
+                                  setState(() => _showRaw = val ?? true);
+                                },
+                              ),
+                              const Text('Raw Data'),
+                            ],
+                          ),
+                          const SizedBox(width: 16),
+                          // Smoothed data toggle
+                          Row(
+                            children: [
+                              Checkbox(
+                                value: _showSmoothed,
+                                onChanged: (val) {
+                                  setState(() => _showSmoothed = val ?? true);
+                                },
+                              ),
+                              const Text('Smoothed'),
+                            ],
+                          ),
+                        ],
                       ),
-                      const Text('Raw Data'),
-                    ],
-                  ),
-                  const SizedBox(width: 16),
-                  // Smoothed data toggle
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: _showSmoothed,
-                        onChanged: (val) {
-                          setState(() => _showSmoothed = val ?? true);
-                        },
-                      ),
-                      const Text('Smoothed'),
-                    ],
-                  ),
-                  // Smoothening options
-                  Row(
-                    children: [
-                      DropdownButton<GraphFilter>(
-                        value: _selFilter,
-                        items: GraphFilter.values.map((GraphFilter value) {
-                          return DropdownMenuItem<GraphFilter>(
-                            value: value,
-                            child: Text(value.name),
-                          );
-                        }).toList(),
-                        onChanged: (newValue) {
-                          setState(() {
-                            _selFilter = newValue!;
-                          });
-                        },
-                      ),
-                    ],
-                  )
-                ],
-              ),
-            ),
+                    ),
+                    // Smoothening options
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        DropdownButton<GraphFilter>(
+                          value: _selFilter,
+                          items: GraphFilter.values.map((GraphFilter value) {
+                            return DropdownMenuItem<GraphFilter>(
+                              value: value,
+                              child: Text(value.name),
+                            );
+                          }).toList(),
+                          onChanged: (newValue) {
+                            setState(() {
+                              _selFilter = newValue!;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                )),
             // The chart
             Expanded(
               child: _buildChart(dist, altRaw, _applyFilter(dist, altRaw)),
