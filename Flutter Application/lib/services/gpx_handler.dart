@@ -152,10 +152,18 @@ class GpxHandler {
   Future<void> importGpxFile() async {
     try {
       // Open file picker to select GPX file
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['gpx'],
-      );
+      FilePickerResult? result;
+
+      // FilePicker for Android for custom extensions are broken somehow, allow all files, but ensure GPX file later
+      // Can remove if future versions of FilePicker fix this
+      if (Platform.isAndroid) {
+        result = await FilePicker.platform.pickFiles();
+      } else {
+        result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['gpx'],
+        );
+      }
 
       if (result == null || result.files.isEmpty) {
         print('File selection canceled');
@@ -166,6 +174,12 @@ class GpxHandler {
       String? filePath = result.files.single.path;
       if (filePath == null) {
         print('Could not get file path');
+        return;
+      }
+
+      // Ensure GPX file
+      if (!filePath.split('/').last.endsWith('.gpx')) {
+        print('Not GPX file');
         return;
       }
 
@@ -207,7 +221,7 @@ class GpxHandler {
     return metadata;
   }
 
-  void setGpxName(String filePath, String name) async {
+  Future<void> setGpxName(String filePath, String name) async {
     File file = File(filePath);
     final contents = await file.readAsString();
     final document = XmlDocument.parse(contents);
