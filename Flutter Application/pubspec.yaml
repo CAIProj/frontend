@@ -17,6 +17,7 @@ dependencies:
   file_picker: ^10.1.5        # Für Dateiauswahl
   intl: ^0.18.1               # Für Datums- und Zahlenformatierung
   sensors_plus: ^6.1.1
+  provider: ^6.1.5
 
 dev_dependencies:
   flutter_test:

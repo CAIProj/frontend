@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:provider/provider.dart';
 import 'package:tracking_app/functional/graph.dart';
 import 'package:tracking_app/domain/measurement.dart';
 import 'package:tracking_app/domain/track_file.dart';
+import 'package:tracking_app/functional/notification.dart' as n;
 import 'package:tracking_app/pages/tracks_page.dart';
 import 'package:tracking_app/services/gpx_handler.dart';
 
@@ -43,6 +45,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkLocationPermission();
+
+    context.read<n.NotificationController>().initOverlay(context);
   }
 
   @override
@@ -316,6 +320,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   AppBar _buildAppBar() {
+    n.NotificationController _popUpController =
+        context.read<n.NotificationController>();
     return AppBar(
       title: const Text('TrackIN'),
       actions: [
@@ -330,10 +336,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
         // Load GPX file button
         IconButton(
-          icon: const Icon(Icons.folder_open),
-          tooltip: 'Load GPX file',
-          onPressed: !_tracking ? _gpxHandler.importGpxFile : null,
-        ),
+            icon: const Icon(Icons.folder_open),
+            tooltip: 'Load GPX file',
+            onPressed: () async {
+              if (!_tracking) {
+                final (success, error) = await _gpxHandler.importGpxFile();
+                if (success) {
+                  _popUpController.addNotification(n.Notification(
+                      type: n.NotificationType.Success,
+                      text: 'Imported GPX File'));
+                } else {
+                  _popUpController.addNotification(n.Notification(
+                      type: n.NotificationType.Error,
+                      text: error ?? 'Unknown Error'));
+                }
+              }
+            }),
         // Track info button (visible when track is loaded)
         if (_isLoadedTrack)
           IconButton(

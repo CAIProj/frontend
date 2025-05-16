@@ -149,7 +149,7 @@ class GpxHandler {
     );
   }
 
-  Future<void> importGpxFile() async {
+  Future<(bool, String?)> importGpxFile() async {
     try {
       // Open file picker to select GPX file
       FilePickerResult? result;
@@ -166,21 +166,18 @@ class GpxHandler {
       }
 
       if (result == null || result.files.isEmpty) {
-        print('File selection canceled');
-        return;
+        return (false, 'File selection canceled');
       }
 
       // Get the file path
       String? filePath = result.files.single.path;
       if (filePath == null) {
-        print('Could not get file path');
-        return;
+        return (false, 'Could not get file path');
       }
 
       // Ensure GPX file
       if (!filePath.split('/').last.endsWith('.gpx')) {
-        print('Not GPX file');
-        return;
+        return (false, 'Not GPX file');
       }
 
       // Read the file contents
@@ -194,8 +191,9 @@ class GpxHandler {
       final copiedFile =
           File('${((await _directory).path)}/${file.path.split('/').last}');
       copiedFile.writeAsString(contents);
+      return (true, null);
     } catch (e) {
-      print('Error loading GPX file: $e');
+      return (false, 'Error loading GPX file: $e');
     }
   }
 

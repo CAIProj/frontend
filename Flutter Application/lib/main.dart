@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:tracking_app/functional/notification.dart';
+import 'package:provider/provider.dart';
 import 'pages/home_page.dart';
 
 void main() => runApp(const TrackingApp());
@@ -10,66 +12,73 @@ class TrackingApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext ctx) => MaterialApp(
-      title: 'TrackIN',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.light,
-        ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 2,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(120, 45),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+        title: 'TrackIN',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.blue,
+            brightness: Brightness.light,
+          ),
+          appBarTheme: const AppBarTheme(
+            centerTitle: true,
+            elevation: 2,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(120, 45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
           ),
-        ),
-        cardTheme: CardTheme(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        actionIconTheme: ActionIconThemeData(
-          backButtonIconBuilder: (BuildContext context) =>
-              Icon(Icons.chevron_left),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blue,
-          brightness: Brightness.dark,
-        ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 2,
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(120, 45),
+          cardTheme: CardTheme(
+            elevation: 2,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
-        ),
-        cardTheme: CardTheme(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+          actionIconTheme: ActionIconThemeData(
+            backButtonIconBuilder: (BuildContext context) =>
+                Icon(Icons.chevron_left),
           ),
         ),
-        actionIconTheme: ActionIconThemeData(
-          backButtonIconBuilder: (BuildContext context) =>
-              Icon(Icons.chevron_left),
+        darkTheme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: Colors.blue,
+            brightness: Brightness.dark,
+          ),
+          appBarTheme: const AppBarTheme(
+            centerTitle: true,
+            elevation: 2,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(120, 45),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+          cardTheme: CardTheme(
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+          actionIconTheme: ActionIconThemeData(
+            backButtonIconBuilder: (BuildContext context) =>
+                Icon(Icons.chevron_left),
+          ),
         ),
-      ),
-      themeMode: ThemeMode.system,
-      home: const HomePage());
+        themeMode: ThemeMode.system,
+        builder: (context, child) => MultiProvider(
+          providers: [
+            ChangeNotifierProvider(create: (_) => NotificationController())
+          ],
+          child: child,
+        ),
+        home: const HomePage(),
+      );
 }

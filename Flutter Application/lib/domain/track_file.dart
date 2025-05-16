@@ -14,4 +14,7 @@ class TrackFile {
     required this.pointCount,
     required this.measurements,
   });
+
+  String get displayName =>
+      name == null || name == '' ? 'Unnamed track' : name!;
 }
