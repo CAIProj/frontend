@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:tracking_app/constants/app_constants.dart';
@@ -31,12 +33,28 @@ class _TrackPageState extends State<TrackPage> {
     _editNameController = TextEditingController(text: trackFile.displayName);
   }
 
+  double _calculateElevationGain(List<double> elevations) {
+    if (elevations.length <= 1) return 0;
+
+    double totalGain = 0;
+    for (int i = 1; i < elevations.length; i++) {
+      final diff = elevations[i] - elevations[i - 1];
+      if (diff > 0) totalGain += diff;
+    }
+
+    return totalGain;
+  }
+
   @override
   Widget build(BuildContext context) {
     final distances = get_distances(trackFile.measurements);
     final totalDistance = distances.isEmpty ? 0.0 : distances.last;
     final totalDuration = trackFile.measurements.last.t
         .difference(trackFile.measurements.first.t);
+    final elevations = trackFile.measurements.map((m) => m.gpsAlt).toList();
+    final minElevation = elevations.reduce(min);
+    final maxElevation = elevations.reduce(max);
+    final elevationGain = _calculateElevationGain(elevations);
     final hasBarometer =
         (trackFile.measurements.first.baroAlt != null).toString();
 
@@ -132,118 +150,46 @@ class _TrackPageState extends State<TrackPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 14),
-                                      child: Tooltip(
-                                        message: 'Points',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.polyline_outlined,
-                                              color:
-                                                  AppConstants.primaryTextColor,
-                                            ),
-                                            SizedBox(
-                                              width: 8,
-                                            ),
-                                            Text(
-                                              '${trackFile.pointCount}',
-                                              style: TextStyle(
-                                                fontSize:
-                                                    AppConstants.textSizeMedium,
-                                                color: AppConstants
-                                                    .primaryTextColor,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 14),
-                                      child: Tooltip(
-                                        message: 'Distance',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.route_outlined,
-                                              color:
-                                                  AppConstants.primaryTextColor,
-                                            ),
-                                            SizedBox(
-                                              width: 8,
-                                            ),
-                                            Text(
-                                              '${totalDistance.toStringAsFixed(2)} km',
-                                              style: TextStyle(
-                                                fontSize:
-                                                    AppConstants.textSizeMedium,
-                                                color: AppConstants
-                                                    .primaryTextColor,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 14),
-                                      child: Tooltip(
-                                        message: 'Duration',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.schedule_outlined,
-                                              color:
-                                                  AppConstants.primaryTextColor,
-                                            ),
-                                            SizedBox(
-                                              width: 8,
-                                            ),
-                                            Text(
-                                              '${totalDuration.inHours}h ${totalDuration.inMinutes % 60}m ${totalDuration.inSeconds % 60}s',
-                                              style: TextStyle(
-                                                fontSize:
-                                                    AppConstants.textSizeMedium,
-                                                color: AppConstants
-                                                    .primaryTextColor,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(vertical: 14),
-                                      child: Tooltip(
-                                        message: 'Barometer',
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.edgesensor_high_outlined,
-                                              color:
-                                                  AppConstants.primaryTextColor,
-                                            ),
-                                            SizedBox(
-                                              width: 8,
-                                            ),
-                                            Text(
-                                              '${hasBarometer[0].toUpperCase() + hasBarometer.substring(1)}',
-                                              style: TextStyle(
-                                                fontSize:
-                                                    AppConstants.textSizeMedium,
-                                                color: AppConstants
-                                                    .primaryTextColor,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
+                                    TrackStatistic(
+                                        icon: Icons.polyline_outlined,
+                                        tooltip: 'Points',
+                                        text: '${trackFile.pointCount}'),
+                                    TrackStatistic(
+                                        icon: Icons.route_outlined,
+                                        tooltip: 'Distance',
+                                        text:
+                                            '${totalDistance.toStringAsFixed(2)} km'),
+                                    TrackStatistic(
+                                        icon: Icons.schedule_outlined,
+                                        tooltip: 'Duration',
+                                        text:
+                                            '${(totalDuration.inHours).toString().padLeft(2, '0')}h ${(totalDuration.inMinutes % 60).toString().padLeft(2, '0')}m ${(totalDuration.inSeconds % 60).toString().padLeft(2, '0')}s'),
+                                    TrackStatistic(
+                                        icon: Icons
+                                            .vertical_align_bottom_outlined,
+                                        tooltip: 'Minimum Elevation',
+                                        text:
+                                            '${minElevation.toStringAsFixed(2)} m'),
+                                    TrackStatistic(
+                                        icon: Icons.vertical_align_top_outlined,
+                                        tooltip: 'Maximum Elevation',
+                                        text:
+                                            '${maxElevation.toStringAsFixed(2)} m'),
+                                    TrackStatistic(
+                                        icon: Icons.height_outlined,
+                                        tooltip: 'Elevation Range ',
+                                        text:
+                                            '${(maxElevation - minElevation).toStringAsFixed(2)} m'),
+                                    TrackStatistic(
+                                        icon: Icons.trending_up_outlined,
+                                        tooltip: 'Total Ascent',
+                                        text:
+                                            '${elevationGain.toStringAsFixed(2)} m'),
+                                    TrackStatistic(
+                                        icon: Icons.edgesensor_high_outlined,
+                                        tooltip: 'Barometer',
+                                        text:
+                                            '${hasBarometer[0].toUpperCase() + hasBarometer.substring(1)}'),
                                   ],
                                 ),
                               ),
@@ -359,6 +305,45 @@ class _TrackPageState extends State<TrackPage> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class TrackStatistic extends StatelessWidget {
+  IconData icon;
+  String text;
+  String tooltip;
+
+  TrackStatistic(
+      {required IconData this.icon,
+      required String this.text,
+      required String this.tooltip});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 14),
+      child: Tooltip(
+        message: tooltip,
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: AppConstants.primaryTextColor,
+            ),
+            SizedBox(
+              width: 8,
+            ),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: AppConstants.textSizeMedium,
+                color: AppConstants.primaryTextColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
