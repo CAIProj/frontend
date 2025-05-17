@@ -53,12 +53,12 @@ class _NotificationContainerState extends State<NotificationContainer> {
 
     List<Widget> elements = [];
     _notificationController.notifications.forEach((e) {
-      elements.add(SizedBox(height: 24));
+      elements.add(SizedBox(height: 12));
       elements.add(NotificationInstance(
         key: Key(e.timeInserted.toString()),
         notificationMessageType: e.type,
         text: e.text,
-        onFadeOut: () {
+        onFinish: () {
           if (mounted) {
             setState(() {
               _notificationController.notifications.remove(e);
@@ -67,20 +67,20 @@ class _NotificationContainerState extends State<NotificationContainer> {
         },
       ));
     });
-    return Column(children: elements);
+    return SafeArea(child: Column(children: elements));
   }
 }
 
 class NotificationInstance extends StatefulWidget {
   final NotificationType notificationMessageType;
   final String text;
-  final VoidCallback? onFadeOut;
+  final VoidCallback? onFinish;
 
   const NotificationInstance(
-      {Key? key,
+      {required Key key,
       required this.notificationMessageType,
       required this.text,
-      this.onFadeOut})
+      this.onFinish})
       : super(key: key);
 
   @override
@@ -124,8 +124,8 @@ class _NotificationInstanceState extends State<NotificationInstance>
           _controller.reverse();
 
           Future.delayed(_transitionTime, () {
-            if (mounted && widget.onFadeOut != null) {
-              widget.onFadeOut!();
+            if (mounted && widget.onFinish != null) {
+              widget.onFinish!();
             }
           });
         }
@@ -159,28 +159,37 @@ class _NotificationInstanceState extends State<NotificationInstance>
         axis: Axis.vertical,
         sizeFactor: _animation,
         child: Center(
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _getColor(),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            constraints: BoxConstraints(minWidth: 100),
-            child: IntrinsicWidth(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    widget.text,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: AppConstants.textSizeMedium,
-                      color: Colors.white,
-                      fontWeight: FontWeight.normal,
-                      decoration: TextDecoration.none,
+          child: Dismissible(
+            key: widget.key!,
+            direction: DismissDirection.horizontal,
+            onDismissed: (direction) {
+              if (widget.onFinish != null) {
+                widget.onFinish!();
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _getColor(),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              constraints: BoxConstraints(minWidth: 100),
+              child: IntrinsicWidth(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      widget.text,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: AppConstants.textSizeM,
+                        color: Colors.white,
+                        fontWeight: FontWeight.normal,
+                        decoration: TextDecoration.none,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
