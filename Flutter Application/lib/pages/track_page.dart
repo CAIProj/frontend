@@ -51,7 +51,8 @@ class _TrackPageState extends State<TrackPage> {
     final totalDistance = distances.isEmpty ? 0.0 : distances.last;
     final totalDuration = trackFile.measurements.last.t
         .difference(trackFile.measurements.first.t);
-    final elevations = trackFile.measurements.map((m) => m.gpsAlt).toList();
+    final elevations =
+        trackFile.measurements.map((m) => m.baroAlt ?? m.gpsAlt).toList();
     final minElevation = elevations.reduce(min);
     final maxElevation = elevations.reduce(max);
     final elevationGain = _calculateElevationGain(elevations);
@@ -134,7 +135,7 @@ class _TrackPageState extends State<TrackPage> {
                                 Text(
                                     '${trackFile.date.day}.${trackFile.date.month}.${trackFile.date.year}, ${trackFile.date.hour}:${trackFile.date.minute}',
                                     style: TextStyle(
-                                      fontSize: AppConstants.textSizeLarge,
+                                      fontSize: AppConstants.textSizeL,
                                       color: AppConstants.primaryTextColor,
                                     )),
                               ],
@@ -152,8 +153,8 @@ class _TrackPageState extends State<TrackPage> {
                                   children: [
                                     TrackStatistic(
                                         icon: Icons.polyline_outlined,
-                                        tooltip: 'Points',
-                                        text: '${trackFile.pointCount}'),
+                                        tooltip: 'Number of points',
+                                        text: '${trackFile.pointCount} points'),
                                     TrackStatistic(
                                         icon: Icons.route_outlined,
                                         tooltip: 'Distance',
@@ -167,22 +168,22 @@ class _TrackPageState extends State<TrackPage> {
                                     TrackStatistic(
                                         icon: Icons
                                             .vertical_align_bottom_outlined,
-                                        tooltip: 'Minimum Elevation',
+                                        tooltip: 'Minimum elevation',
                                         text:
                                             '${minElevation.toStringAsFixed(2)} m'),
                                     TrackStatistic(
                                         icon: Icons.vertical_align_top_outlined,
-                                        tooltip: 'Maximum Elevation',
+                                        tooltip: 'Maximum elevation',
                                         text:
                                             '${maxElevation.toStringAsFixed(2)} m'),
                                     TrackStatistic(
                                         icon: Icons.height_outlined,
-                                        tooltip: 'Elevation Range ',
+                                        tooltip: 'Elevation range ',
                                         text:
                                             '${(maxElevation - minElevation).toStringAsFixed(2)} m'),
                                     TrackStatistic(
                                         icon: Icons.trending_up_outlined,
-                                        tooltip: 'Total Ascent',
+                                        tooltip: 'Total ascent',
                                         text:
                                             '${elevationGain.toStringAsFixed(2)} m'),
                                     TrackStatistic(
@@ -216,7 +217,7 @@ class _TrackPageState extends State<TrackPage> {
                                               'Rename',
                                               style: TextStyle(
                                                 fontSize:
-                                                    AppConstants.textSizeMedium,
+                                                    AppConstants.textSizeM,
                                                 color: AppConstants
                                                     .primaryTextColor,
                                               ),
@@ -248,7 +249,7 @@ class _TrackPageState extends State<TrackPage> {
                                               'Share',
                                               style: TextStyle(
                                                 fontSize:
-                                                    AppConstants.textSizeMedium,
+                                                    AppConstants.textSizeM,
                                                 color: AppConstants
                                                     .primaryTextColor,
                                               ),
@@ -287,7 +288,7 @@ class _TrackPageState extends State<TrackPage> {
                                               'Delete',
                                               style: TextStyle(
                                                 fontSize:
-                                                    AppConstants.textSizeMedium,
+                                                    AppConstants.textSizeM,
                                                 color: AppConstants
                                                     .primaryTextColor,
                                               ),
@@ -339,7 +340,7 @@ class TrackStatistic extends StatelessWidget {
             Text(
               text,
               style: TextStyle(
-                fontSize: AppConstants.textSizeMedium,
+                fontSize: AppConstants.textSizeM,
                 color: AppConstants.primaryTextColor,
               ),
             ),

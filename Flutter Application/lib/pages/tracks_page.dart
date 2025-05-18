@@ -139,16 +139,14 @@ class TrackInstance extends StatefulWidget {
       {super.key, required this.trackFile, required Function this.onDelete});
   @override
   State<TrackInstance> createState() =>
-      _TrackInstanceState(trackFile: trackFile, onDelete: onDelete);
+      _TrackInstanceState(trackFile: trackFile);
 }
 
 class _TrackInstanceState extends State<TrackInstance> {
   GpxHandler _gpxHandler = GpxHandler();
   TrackFile trackFile;
-  Function onDelete;
 
-  _TrackInstanceState(
-      {required TrackFile this.trackFile, required Function this.onDelete});
+  _TrackInstanceState({required TrackFile this.trackFile});
 
   void _onUpdate() async {
     trackFile = await _gpxHandler.loadGpxFile(trackFile.path);
@@ -160,65 +158,66 @@ class _TrackInstanceState extends State<TrackInstance> {
     n.NotificationController _popUpController =
         context.read<n.NotificationController>();
     return GestureDetector(
-        onTap: () {
-          Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => TrackPage(
-                        trackFile: trackFile,
-                      ))).then((changes) {
-            if (changes == TrackChange.Edited) {
-              _onUpdate();
-            } else if (changes == TrackChange.Deleted) {
-              _popUpController.addNotification(n.Notification(
-                  type: n.NotificationType.General, text: 'Track deleted'));
-              onDelete();
-            }
-          });
-        },
-        child: Padding(
-            padding: EdgeInsets.only(left: 16, right: 16),
-            child: Container(
-                padding:
-                    EdgeInsets.only(left: 16, right: 16, top: 20, bottom: 20),
-                decoration: BoxDecoration(
-                  color: AppConstants.primaryBackgroundColor,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.5),
-                          child: Text(
-                            trackFile.displayName,
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: AppConstants.primaryTextColor,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          '${trackFile.date.day}.${trackFile.date.month}.${trackFile.date.year}, ${trackFile.date.hour}:${trackFile.date.minute}',
-                          style: TextStyle(
-                            fontSize: AppConstants.textSizeMedium,
-                            color: AppConstants.primaryTextColor,
-                          ),
-                        )
-                      ],
+      onTap: () {
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (context) => TrackPage(
+                      trackFile: trackFile,
+                    ))).then((changes) {
+          if (changes == TrackChange.Edited) {
+            _onUpdate();
+          } else if (changes == TrackChange.Deleted) {
+            _popUpController.addNotification(n.Notification(
+                type: n.NotificationType.General, text: 'Track deleted'));
+            widget.onDelete();
+          }
+        });
+      },
+      child: Padding(
+        padding: EdgeInsets.only(left: 16, right: 16),
+        child: Container(
+          padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: 20),
+          decoration: BoxDecoration(
+            color: AppConstants.primaryBackgroundColor,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.5),
+                    child: Text(
+                      trackFile.displayName,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: AppConstants.primaryTextColor,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    Spacer(),
-                    Icon(
-                      Icons.chevron_right,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '${trackFile.date.day}.${trackFile.date.month}.${trackFile.date.year}, ${trackFile.date.hour}:${trackFile.date.minute}',
+                    style: TextStyle(
+                      fontSize: AppConstants.textSizeM,
                       color: AppConstants.primaryTextColor,
-                    )
-                  ],
-                ))));
+                    ),
+                  )
+                ],
+              ),
+              Spacer(),
+              Icon(
+                Icons.chevron_right,
+                color: AppConstants.primaryTextColor,
+              )
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

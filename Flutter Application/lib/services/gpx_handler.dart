@@ -177,7 +177,7 @@ class GpxHandler {
 
       // Ensure GPX file
       if (!filePath.split('/').last.endsWith('.gpx')) {
-        return (false, 'Not GPX file');
+        return (false, 'Selected file is not a GPX file');
       }
 
       // Read the file contents
