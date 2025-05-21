@@ -34,9 +34,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Timer? _gpsTimer;
   StreamSubscription? _baroSub;
   TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
-  String _status = 'Ready';
   Position? _currentPosition;
   final _maxPoints = 1000; // Maximum points to store for memory optimization
+
+  bool _permissionsEnabled = false;
 
   GpxHandler _gpxHandler = GpxHandler();
 
@@ -77,7 +78,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _checkLocationPermission() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
-      setState(() => _status = 'Location services disabled');
       _showLocationDialog();
       return;
     }
@@ -86,21 +86,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        setState(() => _status = 'Location permission denied');
         return;
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      setState(() => _status = 'Location permissions permanently denied');
       _showPermissionSettingsDialog();
       return;
     }
 
-    // Ready to track
-    setState(() => _status = 'Ready to track');
     // Get position once to show initial coordinates
     _capturePosition();
+
+    setState(() {
+      _permissionsEnabled = true;
+    });
   }
 
   void _showLocationDialog() {
@@ -177,7 +177,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _start() {
     _doTrack();
     setState(() {
-      _status = 'Tracking in progress...';
       _meas.clear();
     });
   }
@@ -188,12 +187,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
     _gpsTimer?.cancel();
     _baroSub?.cancel();
-    setState(() => _status = 'Tracking paused');
+
+    context.read<n.NotificationController>().addNotification(n.Notification(
+        type: n.NotificationType.General, text: 'Tracking paused'));
   }
 
   void _resumeTracking() {
     _doTrack();
-    setState(() => _status = 'Tracking resumed');
+    context.read<n.NotificationController>().addNotification(n.Notification(
+        type: n.NotificationType.General, text: 'Tracking resumed'));
   }
 
   Future<void> _capturePosition() async {
@@ -210,8 +212,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (_meas.length > _maxPoints) {
           _meas.removeAt(0);
         }
-
-        _status = 'Location updated';
       });
 
       if (_scroll.hasClients) {
@@ -222,11 +222,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         );
       }
     } on Exception catch (e) {
-      setState(() => _status = 'GPS error: $e');
+      context.read<n.NotificationController>().addNotification(n.Notification(
+          type: n.NotificationType.Error, text: 'GPS error: $e'));
     }
   }
 
   Future<void> _stopAndSave() async {
+    final _notificationController = context.read<n.NotificationController>();
+
     // Properly cancel all tracking services
     _gpsTimer?.cancel();
     _gpsTimer = null;
@@ -235,19 +238,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
     setState(() {
       _trackingStatus = TrackingStatus.STOPPED;
-      _status = 'Tracking stopped';
     });
 
     if (_meas.isEmpty) {
-      context.read<n.NotificationController>().addNotification(n.Notification(
+      _notificationController.addNotification(n.Notification(
           type: n.NotificationType.Error,
           text: 'No tracking data available to export'));
       return;
     }
 
-    final file = await _gpxHandler.saveMeasurementsToGpxFile(
+    await _gpxHandler.saveMeasurementsToGpxFile(
         'Altitude Tracking Data', _meas);
-    setState(() => _status = 'Saved: ${file.path}');
+    _notificationController.addNotification(n.Notification(
+        type: n.NotificationType.Success, text: 'Stopped and saved track'));
   }
 
   /* ---------- UI HELPER WIDGETS -------------------------------------- */
@@ -488,23 +491,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              StartRecordingWidget(
-                trackingStatus: _trackingStatus,
-                onTap: () {
-                  if (_trackingStatus == TrackingStatus.TRACKING) {
-                    _pauseTracking();
-                  } else if (_trackingStatus == TrackingStatus.PAUSED) {
-                    _resumeTracking();
-                  }
-                },
-                onLongHold: () {
-                  if (_trackingStatus != TrackingStatus.TRACKING) {
-                    _start();
-                  } else {
-                    _stopAndSave();
-                  }
-                },
-              )
+              _permissionsEnabled
+                  ? StartRecordingWidget(
+                      trackingStatus: _trackingStatus,
+                      onTap: () {
+                        if (_trackingStatus == TrackingStatus.TRACKING) {
+                          _pauseTracking();
+                        } else if (_trackingStatus == TrackingStatus.PAUSED) {
+                          _resumeTracking();
+                        }
+                      },
+                      onLongHold: () {
+                        if (_trackingStatus != TrackingStatus.TRACKING) {
+                          _start();
+                        } else {
+                          _stopAndSave();
+                        }
+                      },
+                    )
+                  : TextButton(
+                      onPressed: () {
+                        _checkLocationPermission();
+                      },
+                      child: Text(
+                        'Please allow permissions for location access',
+                        style: TextStyle(
+                          fontSize: AppConstants.textSizeM,
+                          color: AppConstants.error,
+                        ),
+                      ),
+                    )
             ],
           ),
         ),
@@ -525,24 +541,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Current Status',
-                        style: Theme.of(context).textTheme.titleMedium),
-                    _trackingStatus == TrackingStatus.TRACKING
-                        ? _buildStatusIndicator()
-                        : Container(),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(_status,
-                    style: TextStyle(
-                      color: _trackingStatus == TrackingStatus.TRACKING
-                          ? Colors.green
-                          : Colors.grey,
-                    )),
-                const Divider(),
                 _buildCoordinatesDisplay(),
               ],
             ),
@@ -776,22 +774,22 @@ class _StartRecordingState extends State<StartRecordingWidget>
       _heldOpacity = 1.0;
     }
 
-    return GestureDetector(
-      onTapDown: (_) {
-        _isHeldNotifier.value = (true, DateTime.now().millisecond);
-      },
-      onTapUp: (_) {
-        _isHeldNotifier.value = (false, 0);
-        if (_nextReleaseIsLongHold) {
-          widget.onLongHold();
-          _nextReleaseIsLongHold = false;
-        } else {
-          widget.onTap();
-        }
-      },
-      child: Column(
-        children: [
-          SizedBox(
+    return Column(
+      children: [
+        GestureDetector(
+          onTapDown: (_) {
+            _isHeldNotifier.value = (true, DateTime.now().millisecond);
+          },
+          onTapUp: (_) {
+            _isHeldNotifier.value = (false, 0);
+            if (_nextReleaseIsLongHold) {
+              widget.onLongHold();
+              _nextReleaseIsLongHold = false;
+            } else {
+              widget.onTap();
+            }
+          },
+          child: SizedBox(
             height: _size,
             child: Stack(
               alignment: Alignment.center,
@@ -822,22 +820,21 @@ class _StartRecordingState extends State<StartRecordingWidget>
               ),
             ),
           ),
-          SizedBox(height: 12),
-          AnimatedOpacity(
-            opacity: _heldOpacity,
-            duration: Duration(milliseconds: 400),
-            key:
-                ValueKey<bool>(widget.trackingStatus == TrackingStatus.STOPPED),
-            child: Text(
-              getText(),
-              style: TextStyle(
-                fontSize: AppConstants.textSizeM,
-                color: AppConstants.primaryTextColor,
-              ),
+        ),
+        SizedBox(height: 12),
+        AnimatedOpacity(
+          opacity: _heldOpacity,
+          duration: Duration(milliseconds: 400),
+          key: ValueKey<bool>(widget.trackingStatus == TrackingStatus.STOPPED),
+          child: Text(
+            getText(),
+            style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
             ),
-          )
-        ],
-      ),
+          ),
+        )
+      ],
     );
   }
 }
@@ -1057,10 +1054,20 @@ class StatisticsWidget extends StatefulWidget {
 class _StatisticsState extends State<StatisticsWidget> {
   double _opacity = 0.0;
 
-  @override
-  Widget build(BuildContext context) {
+  String _getDistanceString() {
     final distances = get_distances(widget.measurements);
 
+    final double td = distances.isEmpty ? 0.0 : distances.last;
+    if (td < 1) {
+      // Show in meters
+      return '${(td * 1000).toString().padLeft(1, '0')} m';
+    }
+    // Else in km
+    return '${td.toString().padLeft(1, '0')} km';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     if (widget.trackingStatus == TrackingStatus.STOPPED) {
       _opacity = 0.0;
     } else {
@@ -1073,7 +1080,7 @@ class _StatisticsState extends State<StatisticsWidget> {
         children: [
           // Total distance
           Text(
-            '${(distances.isEmpty ? 0.0 : distances.last).toString()} km',
+            '${_getDistanceString()}',
             style: TextStyle(
               fontSize: AppConstants.textSizeXL,
               color: AppConstants.primaryTextColor,

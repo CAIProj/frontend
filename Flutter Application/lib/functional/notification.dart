@@ -52,10 +52,10 @@ class _NotificationContainerState extends State<NotificationContainer> {
         context.watch<NotificationController>();
 
     List<Widget> elements = [];
-    _notificationController.notifications.forEach((e) {
+    _notificationController.notifications.asMap().forEach((index, e) {
       elements.add(SizedBox(height: 12));
       elements.add(NotificationInstance(
-        key: Key(e.timeInserted.toString()),
+        key: ValueKey(e),
         notificationMessageType: e.type,
         text: e.text,
         onFinish: () {
@@ -178,14 +178,16 @@ class _NotificationInstanceState extends State<NotificationInstance>
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      widget.text,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: AppConstants.textSizeM,
-                        color: Colors.white,
-                        fontWeight: FontWeight.normal,
-                        decoration: TextDecoration.none,
+                    Expanded(
+                      child: Text(
+                        widget.text,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: AppConstants.textSizeM,
+                          color: Colors.white,
+                          fontWeight: FontWeight.normal,
+                          decoration: TextDecoration.none,
+                        ),
                       ),
                     ),
                   ],
