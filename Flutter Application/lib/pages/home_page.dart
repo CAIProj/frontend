@@ -623,8 +623,8 @@ class _TimeWidgetState extends State<TimeWidget> {
   late String _clockString;
   late String _stopwatchString;
 
-  int accumulatedElapsedSecs = 0;
-  int elapsedSecs = 0;
+  Duration accumulatedElapsed = Duration.zero;
+  Duration elapsedBeforePause = Duration.zero;
 
   @override
   void initState() {
@@ -641,7 +641,7 @@ class _TimeWidgetState extends State<TimeWidget> {
       (elapsed) {
         setState(() {
           _stopwatchString = _getStopwatchString();
-          elapsedSecs = elapsed.inSeconds;
+          elapsedBeforePause = elapsed;
         });
       },
     );
@@ -652,7 +652,7 @@ class _TimeWidgetState extends State<TimeWidget> {
   }
 
   String _getStopwatchString() {
-    return '${((accumulatedElapsedSecs + elapsedSecs) ~/ 60).toString().padLeft(2, '0')}:${((accumulatedElapsedSecs + elapsedSecs) % 60).toString().padLeft(2, '0')}';
+    return '${((accumulatedElapsed.inSeconds + elapsedBeforePause.inSeconds) ~/ 60).toString().padLeft(2, '0')}:${((accumulatedElapsed.inSeconds + elapsedBeforePause.inSeconds) % 60).toString().padLeft(2, '0')}';
   }
 
   @override
@@ -669,12 +669,14 @@ class _TimeWidgetState extends State<TimeWidget> {
         _ticker.start();
       }
     } else if (widget.trackingStatus == TrackingStatus.PAUSED) {
-      accumulatedElapsedSecs += elapsedSecs;
+      accumulatedElapsed += elapsedBeforePause;
       if (_ticker.isActive) {
+        elapsedBeforePause = Duration.zero;
         _ticker.stop();
       }
     } else {
-      accumulatedElapsedSecs = 0;
+      accumulatedElapsed = Duration.zero;
+      elapsedBeforePause = Duration.zero;
       if (_ticker.isActive) {
         _ticker.stop();
       }
