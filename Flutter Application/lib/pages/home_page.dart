@@ -1090,7 +1090,7 @@ class _StatisticsState extends State<StatisticsWidget> {
           ),
           // Current elevation
           Text(
-            '${(widget.measurements.lastOrNull?.baroAlt ?? widget.measurements.lastOrNull?.gpsAlt ?? 0).toString()} m',
+            '${(widget.measurements.lastOrNull?.baroAlt ?? widget.measurements.lastOrNull?.gpsAlt ?? 0).toString().padLeft(1, '0')} m',
             style: TextStyle(
               fontSize: AppConstants.textSizeXL,
               color: AppConstants.primaryTextColor,
