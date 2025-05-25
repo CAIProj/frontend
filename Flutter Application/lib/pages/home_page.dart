@@ -1062,10 +1062,10 @@ class _StatisticsState extends State<StatisticsWidget> {
     final double td = distances.isEmpty ? 0.0 : distances.last;
     if (td < 1) {
       // Show in meters
-      return '${(td * 1000).toStringAsFixed(1)} m';
+      return '${((td * 1000) * 10).truncate() / 10} m';
     }
     // Else in km
-    return '${td.toStringAsFixed(1)} km';
+    return '${(td * 10).truncate() / 10} km';
   }
 
   @override
@@ -1090,7 +1090,7 @@ class _StatisticsState extends State<StatisticsWidget> {
           ),
           // Current elevation
           Text(
-            '${(widget.measurements.lastOrNull?.baroAlt ?? widget.measurements.lastOrNull?.gpsAlt ?? 0).toStringAsFixed(1)} m',
+            '${((widget.measurements.lastOrNull?.baroAlt ?? widget.measurements.lastOrNull?.gpsAlt ?? 0) * 10).truncate() / 10} m',
             style: TextStyle(
               fontSize: AppConstants.textSizeXL,
               color: AppConstants.primaryTextColor,
