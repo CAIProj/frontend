@@ -97,7 +97,7 @@ class GpxHandler {
           final timeElement = point.findElements('time').firstOrNull;
           final timeString = timeElement?.innerText ?? '';
           final time = timeString.isNotEmpty
-              ? DateTime.parse(timeString)
+              ? DateTime.parse(timeString).toLocal()
               : DateTime.now();
 
           // Check for barometric altitude in extensions
@@ -181,7 +181,6 @@ class GpxHandler {
       }
 
       // Read the file contents
-      print('Reading GPX file...');
       final file = File(filePath);
       final contents = await file.readAsString();
 
