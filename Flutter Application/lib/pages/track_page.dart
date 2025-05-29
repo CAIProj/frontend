@@ -109,12 +109,14 @@ class _TrackPageState extends State<TrackPage> {
             child: ListView(
               children: [
                 SizedBox(
-                    height: 400,
-                    child: TrackGraph(measurements: trackFile.measurements)),
-                SizedBox(height: 30),
+                  height: 400,
+                  child: TrackGraph(measurements: trackFile.measurements),
+                ),
+                SizedBox(height: 12),
 
                 // Information
                 Container(
+                  margin: EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: AppConstants.primaryBackgroundColor,
                     borderRadius: BorderRadius.circular(10),

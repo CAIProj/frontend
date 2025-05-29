@@ -15,6 +15,7 @@ import 'package:tracking_app/constants/app_constants.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
 /* ======================== STATEFUL HOME =============================== */
 
@@ -29,17 +30,17 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /* ---------- STATE --------------------------------------------------- */
   final _meas = <Measurement>[];
-  final _scroll = ScrollController();
   double? _baroAlt;
   Timer? _gpsTimer;
   StreamSubscription? _baroSub;
   TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
-  Position? _currentPosition;
   final _maxPoints = 1000; // Maximum points to store for memory optimization
 
   bool _permissionsEnabled = false;
 
   GpxHandler _gpxHandler = GpxHandler();
+
+  PageController _pageViewController = PageController();
 
   /* ---------- LIFECYCLE ---------------------------------------------- */
   @override
@@ -51,25 +52,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     context.read<n.NotificationController>().initOverlay(context);
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Handle app lifecycle changes to properly manage resources
-    if (state == AppLifecycleState.paused) {
-      // App goes to background
-      _pauseTracking();
-    } else if (state == AppLifecycleState.resumed) {
-      // App comes to foreground
-      if (_trackingStatus == TrackingStatus.TRACKING) {
-        _resumeTracking();
-      }
-    }
-  }
+  // Might remove this because do we really want to have the app opened the whole time we are walking?
+  // @override
+  // void didChangeAppLifecycleState(AppLifecycleState state) {
+  //   // Handle app lifecycle changes to properly manage resources
+  //   if (state == AppLifecycleState.paused) {
+  //     // App goes to background
+  //     if (_trackingStatus == TrackingStatus.TRACKING) {
+  //       _pauseTracking();
+  //     }
+  //   } else if (state == AppLifecycleState.resumed) {
+  //     // App comes to foreground
+  //     if (_trackingStatus == TrackingStatus.PAUSED) {
+  //       _resumeTracking();
+  //     }
+  //   }
+  // }
 
   @override
   void dispose() {
     _gpsTimer?.cancel();
     _baroSub?.cancel();
-    _scroll.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -204,7 +207,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           desiredAccuracy: LocationAccuracy.best);
 
       setState(() {
-        _currentPosition = pos;
         _meas.add(Measurement(DateTime.now(), pos.latitude, pos.longitude,
             pos.altitude, _baroAlt));
 
@@ -213,14 +215,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           _meas.removeAt(0);
         }
       });
-
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent + 72,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
     } on Exception catch (e) {
       context.read<n.NotificationController>().addNotification(n.Notification(
           type: n.NotificationType.Error, text: 'GPS error: $e'));
@@ -236,10 +230,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _baroSub?.cancel();
     _baroSub = null;
 
-    setState(() {
-      _trackingStatus = TrackingStatus.STOPPED;
-    });
-
     if (_meas.isEmpty) {
       _notificationController.addNotification(n.Notification(
           type: n.NotificationType.Error,
@@ -251,48 +241,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         'Altitude Tracking Data', _meas);
     _notificationController.addNotification(n.Notification(
         type: n.NotificationType.Success, text: 'Stopped and saved track'));
+
+    setState(() {
+      _trackingStatus = TrackingStatus.STOPPED;
+      _meas.clear();
+    });
   }
 
   /* ---------- UI HELPER WIDGETS -------------------------------------- */
-  Widget _buildStatusIndicator() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: 12,
-      height: 12,
-      decoration: BoxDecoration(
-        color: _trackingStatus == TrackingStatus.TRACKING
-            ? Colors.green
-            : Colors.red,
-        shape: BoxShape.circle,
-      ),
-    );
-  }
-
-  Widget _buildCoordinatesDisplay() {
-    if (_currentPosition == null) {
-      return const Text('No location data available');
-    }
-
-    final pos = _currentPosition!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Latitude: ${pos.latitude.toStringAsFixed(6)}°'),
-        Text('Longitude: ${pos.longitude.toStringAsFixed(6)}°'),
-        Row(
-          children: [
-            Expanded(
-              child: Text('GPS Alt: ${pos.altitude.toStringAsFixed(1)} m'),
-            ),
-            if (_baroAlt != null)
-              Expanded(
-                child: Text('Baro Alt: ${_baroAlt!.toStringAsFixed(1)} m'),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
 
   AppBar _buildAppBar() {
     n.NotificationController _popUpController =
@@ -344,56 +300,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildMeasurementsList() {
-    if (_meas.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 20),
-          child: Text('No measurements yet',
-              style: TextStyle(fontStyle: FontStyle.italic)),
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Text(
-            'Tracking Data (${_meas.length} points)',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            itemCount: _meas.length,
-            itemBuilder: (_, i) {
-              final m = _meas[i];
-              return ListTile(
-                dense: true,
-                leading: CircleAvatar(
-                  radius: 14,
-                  backgroundColor:
-                      Theme.of(context).colorScheme.primaryContainer,
-                  child: Text('${i + 1}'),
-                ),
-                title: Text(
-                    '${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}'),
-                subtitle: Text(
-                    'Alt: ${m.gpsAlt.toStringAsFixed(1)}m | Baro: ${m.baroAlt?.toStringAsFixed(1) ?? 'n/a'}m'),
-                trailing: Text(
-                  TimeOfDay.fromDateTime(m.t).format(context),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   void _showInfoDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -436,106 +342,191 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         decoration: BoxDecoration(gradient: AppConstants.appBodyGradient),
         child: SafeArea(
           child: Padding(
-            padding: EdgeInsets.all(18),
-            child: PageView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                trackOverview(),
-                trackDetailed(),
-              ],
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: TrackOverviewWidget(
+              permissionsEnabled: _permissionsEnabled,
+              checkLocationPermission: _checkLocationPermission,
+              measurements: _meas,
+              trackingStatus: _trackingStatus,
+              startTracking: _start,
+              pauseTracking: _pauseTracking,
+              resumeTracking: _resumeTracking,
+              stopAndSaveTracking: _stopAndSave,
+              pageViewController: _pageViewController,
             ),
           ),
         ),
       ),
-      // bottomNavigationBar: _buildBottomAppBar(),
+    );
+  }
+}
+
+class TrackDetailedWidget extends StatefulWidget {
+  final List<Measurement> measurements;
+
+  TrackDetailedWidget({required this.measurements});
+  @override
+  _TrackDetailedState createState() => _TrackDetailedState();
+}
+
+class _TrackDetailedState extends State<TrackDetailedWidget>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  final _scroll = ScrollController();
+  int oldMeasurementLength = 0;
+
+  Widget _buildCoordinatesDisplay() {
+    if (widget.measurements.isEmpty) {
+      return Text(
+        'No location data available',
+        style: TextStyle(
+            fontSize: AppConstants.textSizeM,
+            color: AppConstants.primaryTextColor),
+      );
+    }
+
+    final pos = widget.measurements.last;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Latitude: ${pos.lat.toStringAsFixed(6)}°',
+          style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor),
+        ),
+        Text(
+          'Longitude: ${pos.lon.toStringAsFixed(6)}°',
+          style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'GPS Alt: ${pos.gpsAlt.toStringAsFixed(1)} m',
+                style: TextStyle(
+                    fontSize: AppConstants.textSizeM,
+                    color: AppConstants.primaryTextColor),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                pos.baroAlt != null
+                    ? 'Baro Alt: ${pos.baroAlt!.toStringAsFixed(1)} m'
+                    : 'n/a',
+                style: TextStyle(
+                    fontSize: AppConstants.textSizeM,
+                    color: AppConstants.primaryTextColor),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
-  Widget trackOverview() {
-    return Column(
-      children: [
-        Expanded(
-          flex: 5,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
-                children: [
-                  Spacer(flex: 25),
-                  Expanded(
-                    flex: 50,
-                    child: Column(
-                      children: [
-                        TimeWidget(
-                          trackingStatus: _trackingStatus,
-                        ),
-                        SplashTextWidget(trackingStatus: _trackingStatus),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 25,
-                    child: StatisticsWidget(
-                      measurements: _meas,
-                      trackingStatus: _trackingStatus,
-                    ),
-                  ),
-                ],
-              )
-            ],
+  Widget _buildMeasurementsList() {
+    if (widget.measurements.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: Text(
+            'No measurements yet',
+            style: TextStyle(
+              fontStyle: FontStyle.italic,
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
+            ),
           ),
         ),
-        Spacer(flex: 2),
+      );
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Text(
+            'Tracking Data (${widget.measurements.length} points)',
+            style: TextStyle(
+              fontSize: AppConstants.textSizeL,
+              color: AppConstants.primaryTextColor,
+            ),
+          ),
+        ),
         Expanded(
-          flex: 3,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _permissionsEnabled
-                  ? StartRecordingWidget(
-                      trackingStatus: _trackingStatus,
-                      onTap: () {
-                        if (_trackingStatus == TrackingStatus.TRACKING) {
-                          _pauseTracking();
-                        } else if (_trackingStatus == TrackingStatus.PAUSED) {
-                          _resumeTracking();
-                        }
-                      },
-                      onLongHold: () {
-                        if (_trackingStatus != TrackingStatus.TRACKING) {
-                          _start();
-                        } else {
-                          _stopAndSave();
-                        }
-                      },
-                    )
-                  : TextButton(
-                      onPressed: () {
-                        _checkLocationPermission();
-                      },
-                      child: Text(
-                        'Please allow permissions for location access',
-                        style: TextStyle(
-                          fontSize: AppConstants.textSizeM,
-                          color: AppConstants.error,
-                        ),
-                      ),
-                    )
-            ],
+          child: ListView.builder(
+            controller: _scroll,
+            itemCount: widget.measurements.length,
+            itemBuilder: (_, i) {
+              final m = widget.measurements[i];
+              return ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  child: Text('${i + 1}'),
+                ),
+                title: Text(
+                  '${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}',
+                  style: TextStyle(
+                      fontSize: AppConstants.textSizeM,
+                      color: AppConstants.primaryTextColor),
+                ),
+                subtitle: Text(
+                  'Alt: ${m.gpsAlt.toStringAsFixed(1)}m | Baro: ${m.baroAlt?.toStringAsFixed(1) ?? 'n/a'}m',
+                  style: TextStyle(
+                      fontSize: AppConstants.textSizeM,
+                      color: AppConstants.primaryTextColor),
+                ),
+                trailing: Text(
+                  TimeOfDay.fromDateTime(m.t).format(context),
+                  style: TextStyle(
+                      fontSize: AppConstants.textSizeM,
+                      color: AppConstants.primaryTextColor),
+                ),
+              );
+            },
           ),
         ),
       ],
     );
   }
 
-  // TEMP, WILL MERGE THE TWO INTO A MORE SUITABLE FORMAT
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
-  Widget trackDetailed() {
-    return Column(
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    if (oldMeasurementLength < widget.measurements.length) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent + 72,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+      oldMeasurementLength = widget.measurements.length;
+    }
+
+    return ListView(
       children: [
         // Current status/file info card
-        Card(
-          margin: const EdgeInsets.all(12),
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            color: AppConstants.primaryBackgroundColor,
+            borderRadius: BorderRadius.circular(10),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -548,16 +539,160 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
 
         // Altitude graph
-        Expanded(flex: 2, child: TrackGraph(measurements: _meas)),
+        SizedBox(
+          height: 400,
+          child: TrackGraph(measurements: widget.measurements),
+        ),
 
         // Tracking table
-        Expanded(
-          flex: 2,
-          child: Card(
-            margin: const EdgeInsets.all(12),
+        SizedBox(
+          height: 300,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: AppConstants.primaryBackgroundColor,
+              borderRadius: BorderRadius.circular(10),
+            ),
             child: _buildMeasurementsList(),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class TrackOverviewWidget extends StatefulWidget {
+  final bool permissionsEnabled;
+  final Function checkLocationPermission;
+  final List<Measurement> measurements;
+  final TrackingStatus trackingStatus;
+  final Function startTracking;
+  final Function pauseTracking;
+  final Function resumeTracking;
+  final Function stopAndSaveTracking;
+  final PageController pageViewController;
+
+  TrackOverviewWidget({
+    required this.permissionsEnabled,
+    required this.checkLocationPermission,
+    required this.measurements,
+    required this.trackingStatus,
+    required this.startTracking,
+    required this.pauseTracking,
+    required this.resumeTracking,
+    required this.stopAndSaveTracking,
+    required this.pageViewController,
+  });
+
+  @override
+  _TrackOverviewState createState() => _TrackOverviewState();
+}
+
+class _TrackOverviewState extends State<TrackOverviewWidget> {
+  PageController _pageViewController = PageController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Expanded(
+          child: PageView(
+            controller: _pageViewController,
+            children: [
+              Column(
+                children: [
+                  Expanded(
+                    flex: 50,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Row(
+                          children: [
+                            Spacer(flex: 25),
+                            Expanded(
+                              flex: 50,
+                              child: Column(
+                                children: [
+                                  TimeWidget(
+                                    trackingStatus: widget.trackingStatus,
+                                  ),
+                                  SplashTextWidget(
+                                      trackingStatus: widget.trackingStatus),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              flex: 25,
+                              child: StatisticsWidget(
+                                measurements: widget.measurements,
+                                trackingStatus: widget.trackingStatus,
+                              ),
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                  Spacer(flex: 20),
+                  Expanded(
+                    flex: 30,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        widget.permissionsEnabled
+                            ? StartRecordingWidget(
+                                trackingStatus: widget.trackingStatus,
+                                onTap: () {
+                                  if (widget.trackingStatus ==
+                                      TrackingStatus.TRACKING) {
+                                    widget.pauseTracking();
+                                  } else if (widget.trackingStatus ==
+                                      TrackingStatus.PAUSED) {
+                                    widget.resumeTracking();
+                                  }
+                                },
+                                onLongHold: () {
+                                  if (widget.trackingStatus ==
+                                      TrackingStatus.STOPPED) {
+                                    widget.startTracking();
+                                  } else {
+                                    widget.stopAndSaveTracking();
+                                  }
+                                },
+                              )
+                            : TextButton(
+                                onPressed: () {
+                                  widget.checkLocationPermission();
+                                },
+                                child: Text(
+                                  'Please allow permissions for location access',
+                                  style: TextStyle(
+                                    fontSize: AppConstants.textSizeM,
+                                    color: AppConstants.error,
+                                  ),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              TrackDetailedWidget(measurements: widget.measurements)
+            ],
+          ),
+        ),
+        Container(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: SmoothPageIndicator(
+            controller: _pageViewController,
+            count: 2,
+            effect: WormEffect(
+              dotHeight: 10,
+              dotWidth: 10,
+              activeDotColor: AppConstants.primaryTextColor,
+            ),
+          ),
+        )
       ],
     );
   }
@@ -616,7 +751,11 @@ class TimeWidget extends StatefulWidget {
   _TimeWidgetState createState() => _TimeWidgetState();
 }
 
-class _TimeWidgetState extends State<TimeWidget> {
+class _TimeWidgetState extends State<TimeWidget>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   late Timer _timer;
   late Ticker _ticker;
 
@@ -664,6 +803,8 @@ class _TimeWidgetState extends State<TimeWidget> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+
     if (widget.trackingStatus == TrackingStatus.TRACKING) {
       if (!_ticker.isActive) {
         _ticker.start();
@@ -725,14 +866,16 @@ class _StartRecordingState extends State<StartRecordingWidget>
   int _ringCount = 3;
   int _timeOffset = 1000;
   double _heldSizeOffset = 5;
-  late double _size = 30.0 * _ringCount;
+  late double _size = 40.0 * _ringCount;
 
   double _heldOpacity = 1.0;
 
   bool _nextReleaseIsLongHold = false;
 
   final ValueNotifier<int> _timeNotifier = ValueNotifier(0);
-  final ValueNotifier<(bool, int)> _isHeldNotifier = ValueNotifier((false, 0));
+  // isHeld, timeHeld, isHoldCancelled
+  final ValueNotifier<(bool, int, bool)> _isHeldNotifier =
+      ValueNotifier((false, 0, false));
   late final ValueNotifier<List<double>> _currentSizeNotifier =
       ValueNotifier(List.filled(_ringCount, 0));
 
@@ -780,16 +923,20 @@ class _StartRecordingState extends State<StartRecordingWidget>
       children: [
         GestureDetector(
           onTapDown: (_) {
-            _isHeldNotifier.value = (true, DateTime.now().millisecond);
+            _isHeldNotifier.value = (true, DateTime.now().millisecond, false);
           },
           onTapUp: (_) {
-            _isHeldNotifier.value = (false, 0);
+            _isHeldNotifier.value = (false, 0, false);
             if (_nextReleaseIsLongHold) {
               widget.onLongHold();
               _nextReleaseIsLongHold = false;
             } else {
               widget.onTap();
             }
+          },
+          onTapCancel: () {
+            _isHeldNotifier.value = (false, 0, true);
+            _nextReleaseIsLongHold = false;
           },
           child: SizedBox(
             height: _size,
@@ -844,7 +991,7 @@ class _StartRecordingState extends State<StartRecordingWidget>
 class PulsingRingWidget extends StatefulWidget {
   final int index;
   final ValueNotifier<int> tickerTime;
-  final ValueNotifier<(bool, int)> isHeldNotifier;
+  final ValueNotifier<(bool, int, bool)> isHeldNotifier;
   final Function onLongHold;
   final ValueNotifier<List<double>> sizeNotifier;
   final int timeOffset;
@@ -891,14 +1038,21 @@ class _PulsingRingState extends State<PulsingRingWidget>
     currentVelocity = widget.velocity;
 
     widget.isHeldNotifier.addListener(() {
-      final (isHeld, timeHeld) = widget.isHeldNotifier.value;
+      final (isHeld, timeHeld, isHoldCancelled) = widget.isHeldNotifier.value;
       if (!isHeld) {
         maxSize = widget.size;
-        // If previously held (aka released), give a burst of velocity
+        // If previously held (aka released)
         if (wasPreviouslyHeld) {
-          double factor = ((indexesWhenHeld?[indexWhenHeld] ?? 0) + 1);
-          currentVelocity += 300 * 0.7 * factor;
-          currentAcceleration = 0;
+          // and not cancelled, give a burst of velocity
+          if (!isHoldCancelled) {
+            double factor = ((indexesWhenHeld?[indexWhenHeld] ?? 0) + 1);
+            currentVelocity += 300 * 0.7 * factor;
+            currentAcceleration = 0;
+          } else {
+            // Else reset
+            currentVelocity = widget.velocity;
+            currentAcceleration = 0;
+          }
         } else {
           // If released but not long enough
           currentVelocity += 50;
@@ -909,7 +1063,7 @@ class _PulsingRingState extends State<PulsingRingWidget>
         maxSize = widget.size * 1.5;
 
         currentVelocity += 50;
-        currentAcceleration = -250;
+        currentAcceleration = -400;
       }
 
       wasPreviouslyHeld = isHeld;
@@ -943,7 +1097,7 @@ class _PulsingRingState extends State<PulsingRingWidget>
     if (widget.tickerTime.value > previousTimestamp) {
       previousTimestamp = widget.tickerTime.value;
     }
-    final (isHeld, timeHeld) = widget.isHeldNotifier.value;
+    final (isHeld, timeHeld, _) = widget.isHeldNotifier.value;
 
     currentVelocity += currentAcceleration * deltaSecs;
 
@@ -989,7 +1143,8 @@ class _PulsingRingState extends State<PulsingRingWidget>
       indexWhenHeld = getIndexBySize();
       indexesWhenHeld = getIndexBySizeToIndex();
 
-      final minimumSize = 2 + widget.heldSizeOffset * indexWhenHeld!;
+      final minimumSize =
+          5 * (indexWhenHeld! + 1) + widget.heldSizeOffset * indexWhenHeld!;
 
       widget.sizeNotifier.value[widget.index] = max(
           (widget.sizeNotifier.value[widget.index] +

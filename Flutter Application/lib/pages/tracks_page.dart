@@ -61,7 +61,7 @@ class _TracksPageState extends State<TracksPage> {
     return Scaffold(
       appBar: AppBar(
         elevation: 0,
-        foregroundColor: const Color.fromRGBO(255, 255, 255, 0.8),
+        foregroundColor: AppConstants.primaryTextColor,
         centerTitle: true,
         flexibleSpace: Container(
           decoration: BoxDecoration(gradient: AppConstants.appBarGradient),
@@ -69,7 +69,7 @@ class _TracksPageState extends State<TracksPage> {
         title: Container(
           padding: EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: Color.fromRGBO(255, 255, 255, 0.1),
+            color: AppConstants.primaryBackgroundColor,
             borderRadius: BorderRadius.circular(50),
           ),
           height: 38,
@@ -89,7 +89,7 @@ class _TracksPageState extends State<TracksPage> {
                 textAlignVertical: TextAlignVertical.center,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: const Color.fromRGBO(255, 255, 255, 0.8),
+                  color: AppConstants.primaryTextColor,
                 ),
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
@@ -175,7 +175,7 @@ class _TrackInstanceState extends State<TrackInstance> {
         });
       },
       child: Padding(
-        padding: EdgeInsets.only(left: 16, right: 16),
+        padding: EdgeInsets.symmetric(horizontal: 16),
         child: Container(
           padding: EdgeInsets.only(left: 16, right: 16, top: 20, bottom: 20),
           decoration: BoxDecoration(

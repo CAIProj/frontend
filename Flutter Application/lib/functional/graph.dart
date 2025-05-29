@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:equations/equations.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:tracking_app/constants/app_constants.dart';
 import 'package:tracking_app/functional/utils.dart';
 import 'package:tracking_app/domain/measurement.dart';
 
@@ -87,8 +88,14 @@ class _TrackGraphState extends State<TrackGraph> {
 
   Widget _buildChart(List<double> x, List<double> yRaw, List<double> sm) {
     if (x.length < 2) {
-      return const Center(
-        child: Text('No data available for chart'),
+      return Center(
+        child: Text(
+          'No data available for chart',
+          style: TextStyle(
+            fontSize: AppConstants.textSizeM,
+            color: AppConstants.primaryTextColor,
+          ),
+        ),
       );
     }
 
@@ -120,7 +127,13 @@ class _TrackGraphState extends State<TrackGraph> {
             color: Colors.blue,
           ),
           const SizedBox(width: 5),
-          const Text('Raw'),
+          Text(
+            'Raw',
+            style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
+            ),
+          ),
           const SizedBox(width: 20),
         ],
         if (_showSmoothed) ...[
@@ -130,7 +143,13 @@ class _TrackGraphState extends State<TrackGraph> {
             color: Colors.orange,
           ),
           const SizedBox(width: 5),
-          Text('Smoothed (${_selFilter.name})'),
+          Text(
+            'Smoothed (${_selFilter.name})',
+            style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
+            ),
+          ),
         ],
       ],
     );
@@ -179,12 +198,21 @@ class _TrackGraphState extends State<TrackGraph> {
                           axisSide: meta.axisSide,
                           child: Text(
                             value.toStringAsFixed(1),
-                            style: const TextStyle(fontSize: 10),
+                            style: TextStyle(
+                              fontSize: AppConstants.textSizeM,
+                              color: AppConstants.primaryTextColor,
+                            ),
                           ),
                         );
                       },
                     ),
-                    axisNameWidget: const Text('Distance (km)'),
+                    axisNameWidget: Text(
+                      'Distance (km)',
+                      style: TextStyle(
+                        fontSize: AppConstants.textSizeM,
+                        color: AppConstants.primaryTextColor,
+                      ),
+                    ),
                   ),
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
@@ -195,12 +223,21 @@ class _TrackGraphState extends State<TrackGraph> {
                           axisSide: meta.axisSide,
                           child: Text(
                             value.toStringAsFixed(0),
-                            style: const TextStyle(fontSize: 10),
+                            style: TextStyle(
+                              fontSize: AppConstants.textSizeM,
+                              color: AppConstants.primaryTextColor,
+                            ),
                           ),
                         );
                       },
                     ),
-                    axisNameWidget: const Text('Altitude (m)'),
+                    axisNameWidget: Text(
+                      'Altitude (m)',
+                      style: TextStyle(
+                        fontSize: AppConstants.textSizeM,
+                        color: AppConstants.primaryTextColor,
+                      ),
+                    ),
                   ),
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
@@ -250,8 +287,12 @@ class _TrackGraphState extends State<TrackGraph> {
     final dist = get_distances(measurements);
     final altRaw = measurements.map((x) => x.baroAlt ?? x.gpsAlt).toList();
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppConstants.primaryBackgroundColor,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(
@@ -274,7 +315,13 @@ class _TrackGraphState extends State<TrackGraph> {
                                   setState(() => _showRaw = val ?? true);
                                 },
                               ),
-                              const Text('Raw Data'),
+                              Text(
+                                'Raw Data',
+                                style: TextStyle(
+                                  fontSize: AppConstants.textSizeM,
+                                  color: AppConstants.primaryTextColor,
+                                ),
+                              )
                             ],
                           ),
                           const SizedBox(width: 16),
@@ -287,7 +334,13 @@ class _TrackGraphState extends State<TrackGraph> {
                                   setState(() => _showSmoothed = val ?? true);
                                 },
                               ),
-                              const Text('Smoothed'),
+                              Text(
+                                'Smoothed',
+                                style: TextStyle(
+                                  fontSize: AppConstants.textSizeM,
+                                  color: AppConstants.primaryTextColor,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -302,7 +355,13 @@ class _TrackGraphState extends State<TrackGraph> {
                           items: GraphFilter.values.map((GraphFilter value) {
                             return DropdownMenuItem<GraphFilter>(
                               value: value,
-                              child: Text(value.name),
+                              child: Text(
+                                value.name,
+                                style: TextStyle(
+                                  fontSize: AppConstants.textSizeM,
+                                  color: AppConstants.primaryTextColor,
+                                ),
+                              ),
                             );
                           }).toList(),
                           onChanged: (newValue) {
