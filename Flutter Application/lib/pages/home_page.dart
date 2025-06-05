@@ -34,7 +34,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Timer? _gpsTimer;
   StreamSubscription? _baroSub;
   TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
-  final _maxPoints = 1000; // Maximum points to store for memory optimization
 
   bool _permissionsEnabled = false;
 
@@ -162,7 +161,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   void _doTrack() {
     _gpsTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _capturePosition());
+        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
 
     setState(() {
       _trackingStatus = TrackingStatus.TRACKING;
@@ -209,11 +208,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       setState(() {
         _meas.add(Measurement(DateTime.now(), pos.latitude, pos.longitude,
             pos.altitude, _baroAlt));
-
-        // Memory optimization: limit the number of points stored
-        if (_meas.length > _maxPoints) {
-          _meas.removeAt(0);
-        }
       });
     } on Exception catch (e) {
       context.read<n.NotificationController>().addNotification(n.Notification(
