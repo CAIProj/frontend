@@ -32,6 +32,9 @@ class AppConstants {
   static final secondaryBackgroundColor =
       const Color.fromRGBO(255, 255, 255, 0.05);
 
+  static final primarySolidBackgroundColor =
+      const Color.fromRGBO(100, 100, 100, 1);
+
   static final double textSizeXXL = 52;
   static final double textSizeXL = 24;
   static final double textSizeL = 16;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -30,8 +31,11 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /* ---------- STATE --------------------------------------------------- */
   final _meas = <Measurement>[];
+  Position? _gpsPosition;
+  late LocationSettings _locationSettings;
   double? _baroAlt;
   Timer? _gpsTimer;
+  StreamSubscription? _gpsSub;
   StreamSubscription? _baroSub;
   TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
 
@@ -45,34 +49,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    _initLocationSettings();
     _checkLocationPermission();
 
     context.read<n.NotificationController>().initOverlay(context);
   }
 
-  // Might remove this because do we really want to have the app opened the whole time we are walking?
-  // @override
-  // void didChangeAppLifecycleState(AppLifecycleState state) {
-  //   // Handle app lifecycle changes to properly manage resources
-  //   if (state == AppLifecycleState.paused) {
-  //     // App goes to background
-  //     if (_trackingStatus == TrackingStatus.TRACKING) {
-  //       _pauseTracking();
-  //     }
-  //   } else if (state == AppLifecycleState.resumed) {
-  //     // App comes to foreground
-  //     if (_trackingStatus == TrackingStatus.PAUSED) {
-  //       _resumeTracking();
-  //     }
-  //   }
-  // }
-
   @override
   void dispose() {
     _gpsTimer?.cancel();
     _baroSub?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -98,7 +84,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
 
     // Get position once to show initial coordinates
-    _capturePosition();
+    _getInitialPosition();
 
     setState(() {
       _permissionsEnabled = true;
@@ -159,6 +145,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   /* ---------- TRACKING ------------------------------------------------ */
 
+  void _initLocationSettings() {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      _locationSettings = AndroidSettings(
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 5,
+          forceLocationManager: true,
+          intervalDuration: const Duration(seconds: 5),
+          //(Optional) Set foreground notification config to keep the app alive
+          //when going to the background
+          foregroundNotificationConfig: const ForegroundNotificationConfig(
+            notificationText:
+                "TrackIN will continue to receive your location in the background",
+            notificationTitle: "Running in Background",
+            enableWakeLock: true,
+          ));
+    } else if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS) {
+      _locationSettings = AppleSettings(
+        accuracy: LocationAccuracy.best,
+        activityType: ActivityType.fitness,
+        distanceFilter: 5,
+        pauseLocationUpdatesAutomatically: true,
+        // Only set to true if our app will be started up in the background.
+        showBackgroundLocationIndicator: false,
+      );
+    } else if (kIsWeb) {
+      _locationSettings = WebSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
+        maximumAge: Duration(seconds: 5),
+      );
+    } else {
+      _locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
+      );
+    }
+  }
+
   void _doTrack() {
     _gpsTimer =
         Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
@@ -166,6 +191,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _trackingStatus = TrackingStatus.TRACKING;
     });
+    _gpsSub = Geolocator.getPositionStream(
+      locationSettings: _locationSettings,
+    ).listen((Position position) {
+      _gpsPosition = position;
+    });
+
     _baroSub = barometerEventStream(samplingPeriod: Duration(seconds: 1))
         .listen((BarometerEvent e) {
       const p0 = 1013.25;
@@ -188,6 +219,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _trackingStatus = TrackingStatus.PAUSED;
     });
     _gpsTimer?.cancel();
+    _gpsSub?.cancel();
     _baroSub?.cancel();
 
     context.read<n.NotificationController>().addNotification(n.Notification(
@@ -200,14 +232,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         type: n.NotificationType.General, text: 'Tracking resumed'));
   }
 
-  Future<void> _capturePosition() async {
+  Future<void> _getInitialPosition() async {
     try {
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.best);
+        locationSettings: _locationSettings,
+      );
 
+      _gpsPosition = pos;
+      ;
+    } on Exception catch (e) {
+      context.read<n.NotificationController>().addNotification(n.Notification(
+          type: n.NotificationType.Error, text: 'GPS error: $e'));
+    }
+  }
+
+  Future<void> _capturePosition() async {
+    try {
+      if (_gpsPosition == null) return;
       setState(() {
-        _meas.add(Measurement(DateTime.now(), pos.latitude, pos.longitude,
-            pos.altitude, _baroAlt));
+        _meas.add(Measurement(
+          DateTime.now(),
+          _gpsPosition!.latitude,
+          _gpsPosition!.longitude,
+          _gpsPosition!.altitude,
+          _baroAlt,
+        ));
       });
     } on Exception catch (e) {
       context.read<n.NotificationController>().addNotification(n.Notification(
@@ -221,6 +270,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     // Properly cancel all tracking services
     _gpsTimer?.cancel();
     _gpsTimer = null;
+    _gpsSub?.cancel();
+    _gpsSub = null;
     _baroSub?.cancel();
     _baroSub = null;
 
@@ -439,7 +490,10 @@ class _TrackDetailedState extends State<TrackDetailedWidget>
         ),
       );
     }
-
+    // Show only the last 100 points
+    final truncatedMeasurements = widget.measurements.length > 100
+        ? widget.measurements.sublist(widget.measurements.length - 100)
+        : widget.measurements;
     return Column(
       children: [
         Padding(
@@ -455,16 +509,17 @@ class _TrackDetailedState extends State<TrackDetailedWidget>
         Expanded(
           child: ListView.builder(
             controller: _scroll,
-            itemCount: widget.measurements.length,
+            itemCount: truncatedMeasurements.length,
             itemBuilder: (_, i) {
-              final m = widget.measurements[i];
+              final m = truncatedMeasurements[i];
               return ListTile(
                 dense: true,
                 leading: CircleAvatar(
                   radius: 14,
                   backgroundColor:
                       Theme.of(context).colorScheme.primaryContainer,
-                  child: Text('${i + 1}'),
+                  child: Text(
+                      '${widget.measurements.length - truncatedMeasurements.length + i + 1}'),
                 ),
                 title: Text(
                   '${m.lat.toStringAsFixed(6)}, ${m.lon.toStringAsFixed(6)}',
@@ -943,6 +998,7 @@ class _StartRecordingState extends State<StartRecordingWidget>
                     top: 0,
                     child: PulsingRingWidget(
                       key: Key(index.toString()),
+                      trackingStatus: widget.trackingStatus,
                       index: index,
                       tickerTime: _timeNotifier,
                       isHeldNotifier: _isHeldNotifier,
@@ -983,6 +1039,7 @@ class _StartRecordingState extends State<StartRecordingWidget>
 }
 
 class PulsingRingWidget extends StatefulWidget {
+  final TrackingStatus trackingStatus;
   final int index;
   final ValueNotifier<int> tickerTime;
   final ValueNotifier<(bool, int, bool)> isHeldNotifier;
@@ -996,6 +1053,7 @@ class PulsingRingWidget extends StatefulWidget {
 
   PulsingRingWidget({
     Key? key,
+    required this.trackingStatus,
     required this.index,
     required this.tickerTime,
     required this.isHeldNotifier,
@@ -1180,7 +1238,9 @@ class _PulsingRingState extends State<PulsingRingWidget>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: AppConstants.primaryTextColor,
+                  color: widget.trackingStatus == TrackingStatus.TRACKING
+                      ? AppConstants.success
+                      : AppConstants.primaryTextColor,
                   width: 3 * borderCurve,
                 ),
               ),

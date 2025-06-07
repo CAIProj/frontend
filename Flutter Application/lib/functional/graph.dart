@@ -352,6 +352,8 @@ class _TrackGraphState extends State<TrackGraph> {
                       children: [
                         DropdownButton<GraphFilter>(
                           value: _selFilter,
+                          dropdownColor:
+                              AppConstants.primarySolidBackgroundColor,
                           items: GraphFilter.values.map((GraphFilter value) {
                             return DropdownMenuItem<GraphFilter>(
                               value: value,
