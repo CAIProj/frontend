@@ -30,19 +30,21 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /* ---------- STATE --------------------------------------------------- */
+  TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
+
+  late LocationSettings _locationSettings;
+
   final _meas = <Measurement>[];
   Position? _gpsPosition;
-  late LocationSettings _locationSettings;
   double? _baroAlt;
+
   Timer? _gpsTimer;
   StreamSubscription? _gpsSub;
   StreamSubscription? _baroSub;
-  TrackingStatus _trackingStatus = TrackingStatus.STOPPED;
 
   bool _permissionsEnabled = false;
 
   GpxHandler _gpxHandler = GpxHandler();
-
   PageController _pageViewController = PageController();
 
   /* ---------- LIFECYCLE ---------------------------------------------- */
@@ -58,6 +60,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   void dispose() {
     _gpsTimer?.cancel();
+    _gpsSub?.cancel();
     _baroSub?.cancel();
     super.dispose();
   }
@@ -148,18 +151,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _initLocationSettings() {
     if (defaultTargetPlatform == TargetPlatform.android) {
       _locationSettings = AndroidSettings(
-          accuracy: LocationAccuracy.best,
-          distanceFilter: 5,
-          forceLocationManager: true,
-          intervalDuration: const Duration(seconds: 5),
-          //(Optional) Set foreground notification config to keep the app alive
-          //when going to the background
-          foregroundNotificationConfig: const ForegroundNotificationConfig(
-            notificationText:
-                "TrackIN will continue to receive your location in the background",
-            notificationTitle: "Running in Background",
-            enableWakeLock: true,
-          ));
+        accuracy: LocationAccuracy.best,
+        distanceFilter: 5,
+        forceLocationManager: true,
+        intervalDuration: const Duration(seconds: 5),
+        //(Optional) Set foreground notification config to keep the app alive
+        //when going to the background
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationText:
+              "TrackIN will continue to receive your location in the background",
+          notificationTitle: "Running in background",
+          enableWakeLock: true,
+        ),
+      );
     } else if (defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS) {
       _locationSettings = AppleSettings(
@@ -185,16 +189,19 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _doTrack() {
-    _gpsTimer =
-        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
-
     setState(() {
       _trackingStatus = TrackingStatus.TRACKING;
     });
+
+    _gpsTimer =
+        Timer.periodic(const Duration(seconds: 5), (_) => _capturePosition());
+
     _gpsSub = Geolocator.getPositionStream(
       locationSettings: _locationSettings,
     ).listen((Position position) {
-      _gpsPosition = position;
+      setState(() {
+        _gpsPosition = position;
+      });
     });
 
     _baroSub = barometerEventStream(samplingPeriod: Duration(seconds: 1))
@@ -207,10 +214,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     });
   }
 
-  void _start() {
+  void _startTracking() {
     _doTrack();
     setState(() {
       _meas.clear();
+      _capturePosition();
     });
   }
 
@@ -218,6 +226,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     setState(() {
       _trackingStatus = TrackingStatus.PAUSED;
     });
+
     _gpsTimer?.cancel();
     _gpsSub?.cancel();
     _baroSub?.cancel();
@@ -329,9 +338,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           type: n.NotificationType.Success,
                           text: 'Imported GPX File'));
                     } else {
-                      _popUpController.addNotification(n.Notification(
-                          type: n.NotificationType.Error,
-                          text: error ?? 'Unknown Error'));
+                      if (error != null) {
+                        _popUpController.addNotification(
+                          n.Notification(
+                              type: n.NotificationType.Error, text: error),
+                        );
+                      }
                     }
                   }
                 : null),
@@ -393,7 +405,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               checkLocationPermission: _checkLocationPermission,
               measurements: _meas,
               trackingStatus: _trackingStatus,
-              startTracking: _start,
+              startTracking: _startTracking,
               pauseTracking: _pauseTracking,
               resumeTracking: _resumeTracking,
               stopAndSaveTracking: _stopAndSave,

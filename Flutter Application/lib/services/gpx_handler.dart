@@ -166,7 +166,7 @@ class GpxHandler {
       }
 
       if (result == null || result.files.isEmpty) {
-        return (false, 'File selection canceled');
+        return (false, null);
       }
 
       // Get the file path
