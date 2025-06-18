@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,7 +8,7 @@ import 'package:xml/xml.dart';
 
 class GpxHandler {
   /* ----------- GPX I/O -------------------------------------- */
-  Future<Directory> get _directory async {
+  Future<Directory> get _fileDirectory async {
     final Directory dir =
         Directory((await getApplicationDocumentsDirectory()).path + '/files');
 
@@ -18,20 +19,78 @@ class GpxHandler {
     return dir;
   }
 
+  Future<File> get _fileToUploadIdMappingFile async {
+    final File file = File((await getApplicationDocumentsDirectory()).path +
+        '/fileToUploadIdMapping.json');
+
+    if (!(await file.exists())) {
+      await file.create();
+      await file.writeAsString(jsonEncode({}));
+    }
+
+    return file;
+  }
+
+  Future<Map<String, int>> get _fileToUploadIdMapping async {
+    final Map<String, dynamic> decoded =
+        jsonDecode(await (await _fileToUploadIdMappingFile).readAsString());
+
+    final Map<String, int> mapping = {};
+
+    decoded.forEach((k, v) {
+      if (v is int) {
+        // If int, do nothing
+      } else if (v is String) {
+        v = int.tryParse(v);
+      } else {
+        return;
+      }
+      mapping[k] = v;
+    });
+
+    List<String> keysToRemove = [];
+    // Ensure all listed files exist
+    for (String k in mapping.keys.toList()) {
+      if (!(await File(k).exists())) {
+        keysToRemove.add(k.toString());
+      }
+    }
+    for (String k in keysToRemove) {
+      mapping.remove(k);
+    }
+    if (keysToRemove.isNotEmpty) {
+      await (await _fileToUploadIdMappingFile)
+          .writeAsString(jsonEncode(mapping));
+    }
+
+    return mapping;
+  }
+
   String _fileStamp() =>
       'TrackIN_${DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}';
 
   Future<List<File>> _getAllGpxFiles() async {
     final List<FileSystemEntity> files =
-        Directory((await _directory).path).listSync();
+        Directory((await _fileDirectory).path).listSync();
     List<Future<File>> futureFiles =
         files.map((f) async => await File(f.path)).toList();
     return await Future.wait(futureFiles);
   }
 
   Future<List<TrackFile>> getAllTrackFiles() async {
-    return Future.wait(
-        (await _getAllGpxFiles()).map((f) async => await loadGpxFile(f.path)));
+    final files = await _getAllGpxFiles();
+    final mapped = await Future.wait(files.map((f) async {
+      try {
+        final file = await loadGpxFile(f.path);
+        return file;
+      } catch (e) {
+        print("${f.path} is unparsable!");
+        print(e);
+        return null;
+      }
+    }));
+
+    return mapped.whereType<TrackFile>().toList();
   }
 
   Future<File> saveMeasurementsToGpxFile(
@@ -68,7 +127,7 @@ class GpxHandler {
     buf..writeln('</trkseg></trk></gpx>');
 
     // Save file
-    final file = File('${((await _directory).path)}/${_fileStamp()}.gpx');
+    final file = File('${((await _fileDirectory).path)}/${_fileStamp()}.gpx');
     return file.writeAsString(buf.toString());
   }
 
@@ -139,6 +198,8 @@ class GpxHandler {
     // Parse GPX data
     final parsedMeasurements = parseGpxData(contents);
 
+    final mapping = await _fileToUploadIdMapping;
+
     // Create a TrackFile object
     return TrackFile(
       path: path,
@@ -146,7 +207,20 @@ class GpxHandler {
       date: parsedMeasurements.first.t,
       pointCount: parsedMeasurements.length,
       measurements: parsedMeasurements,
+      uploadedTrackId: mapping.containsKey(path) ? mapping[path] : null,
     );
+  }
+
+  Future<void> setFileUploadId(String path, int? uploadId) async {
+    final mappingFile = await _fileToUploadIdMappingFile;
+
+    final mapping = await _fileToUploadIdMapping;
+    if (uploadId != null) {
+      mapping[path] = uploadId;
+    } else {
+      mapping.remove(path);
+    }
+    await mappingFile.writeAsString(jsonEncode(mapping));
   }
 
   Future<(bool, String?)> importGpxFile() async {
@@ -188,7 +262,7 @@ class GpxHandler {
 
       // Save file
       final copiedFile =
-          File('${((await _directory).path)}/${file.path.split('/').last}');
+          File('${((await _fileDirectory).path)}/${file.path.split('/').last}');
       copiedFile.writeAsString(contents);
       return (true, null);
     } catch (e) {

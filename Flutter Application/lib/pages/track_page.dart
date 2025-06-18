@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:tracking_app/constants/app_constants.dart';
 import 'package:tracking_app/functional/graph.dart';
@@ -8,7 +9,9 @@ import 'package:tracking_app/functional/pop_up_dialogue.dart';
 import 'package:tracking_app/functional/utils.dart';
 import 'package:tracking_app/domain/track_file.dart';
 import 'package:tracking_app/pages/tracks_page.dart';
+import 'package:tracking_app/services/framework_controller.dart';
 import 'package:tracking_app/services/gpx_handler.dart';
+import 'package:tracking_app/services/notification_controller.dart' as n;
 
 class TrackPage extends StatefulWidget {
   final TrackFile trackFile;
@@ -26,11 +29,23 @@ class _TrackPageState extends State<TrackPage> {
   TextEditingController _editNameController = TextEditingController();
   FocusNode _editNameFocusNode = FocusNode();
 
+  bool _isDoingFrameworkRequest = false;
+
+  late final _notificationController =
+      Provider.of<n.NotificationController>(context, listen: false);
+
   _TrackPageState({required TrackFile this.trackFile});
   @override
   void initState() {
     super.initState();
     _editNameController = TextEditingController(text: trackFile.displayName);
+  }
+
+  @override
+  void dispose() {
+    _editNameController.dispose();
+    _editNameFocusNode.dispose();
+    super.dispose();
   }
 
   double _calculateElevationGain(List<double> elevations) {
@@ -45,8 +60,74 @@ class _TrackPageState extends State<TrackPage> {
     return totalGain;
   }
 
+  Future<void> triggerFileChange() async {
+    // Reload file and set wasUpdated flag for parent
+    TrackFile t = await _gpxHandler.loadGpxFile(trackFile.path);
+    setState(() {
+      trackFile = t;
+    });
+
+    wasUpdated = true;
+  }
+
+  void onUploadToServerClick(FrameworkController frameworkController,
+      n.NotificationController notificationController) async {
+    if (_isDoingFrameworkRequest) return;
+    setState(() {
+      _isDoingFrameworkRequest = true;
+    });
+    final uploadId = await frameworkController.uploadGPXFile(trackFile);
+
+    if (uploadId != null) {
+      notificationController.addNotification(n.Notification(
+          type: n.NotificationType.Success,
+          text: 'Uploaded with ID $uploadId'));
+      await _gpxHandler.setFileUploadId(
+        trackFile.path,
+        uploadId,
+      );
+
+      triggerFileChange();
+    }
+
+    setState(() {
+      _isDoingFrameworkRequest = false;
+    });
+  }
+
+  void onDeleteFromServerClick(FrameworkController frameworkController,
+      n.NotificationController notificationController) async {
+    if (_isDoingFrameworkRequest) return;
+    setState(() {
+      _isDoingFrameworkRequest = true;
+    });
+
+    final success =
+        await frameworkController.deleteGPXFile(trackFile.uploadedTrackId!);
+
+    if (success) {
+      notificationController.addNotification(n.Notification(
+          type: n.NotificationType.Success,
+          text:
+              'Deleted file with ID ${trackFile.uploadedTrackId} from server'));
+      await _gpxHandler.setFileUploadId(
+        trackFile.path,
+        null,
+      );
+
+      triggerFileChange();
+    }
+
+    setState(() {
+      _isDoingFrameworkRequest = false;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final frameworkController =
+        Provider.of<FrameworkController>(context, listen: true);
+
     final distances = get_distances(trackFile.measurements);
     final totalDistance = distances.isEmpty ? 0.0 : distances.last;
     final totalDuration = trackFile.measurements.last.t
@@ -84,11 +165,7 @@ class _TrackPageState extends State<TrackPage> {
               controller: _editNameController,
               onSubmitted: (value) async {
                 await GpxHandler().setGpxName(trackFile.path, value);
-                TrackFile t = await GpxHandler().loadGpxFile(trackFile.path);
-                setState(() {
-                  trackFile = t;
-                });
-                wasUpdated = true;
+                triggerFileChange();
               },
               decoration: InputDecoration(
                 isDense: true,
@@ -207,12 +284,8 @@ class _TrackPageState extends State<TrackPage> {
                                         margin:
                                             EdgeInsets.symmetric(horizontal: 8),
                                         child: TextButton(
-                                            style: ButtonStyle(
-                                              backgroundColor:
-                                                  WidgetStatePropertyAll(
-                                                      AppConstants
-                                                          .secondaryBackgroundColor),
-                                            ),
+                                            style:
+                                                AppConstants.primaryButtonStyle,
                                             onPressed:
                                                 _editNameFocusNode.requestFocus,
                                             child: Text(
@@ -231,12 +304,8 @@ class _TrackPageState extends State<TrackPage> {
                                         margin:
                                             EdgeInsets.symmetric(horizontal: 8),
                                         child: TextButton(
-                                            style: ButtonStyle(
-                                              backgroundColor:
-                                                  WidgetStatePropertyAll(
-                                                      AppConstants
-                                                          .secondaryBackgroundColor),
-                                            ),
+                                            style:
+                                                AppConstants.primaryButtonStyle,
                                             onPressed: () {
                                               // Show share dialog
                                               Share.shareXFiles(
@@ -257,18 +326,55 @@ class _TrackPageState extends State<TrackPage> {
                                               ),
                                             ))),
                                     SizedBox(height: 5),
+                                    // Upload Button
+                                    Container(
+                                        width: double.infinity,
+                                        margin:
+                                            EdgeInsets.symmetric(horizontal: 8),
+                                        child: TextButton(
+                                            style:
+                                                AppConstants.primaryButtonStyle,
+                                            onPressed: !frameworkController
+                                                    .isLoggedIn
+                                                // Do nothing if not logged in
+                                                ? () {}
+                                                : trackFile.uploadedTrackId ==
+                                                        null
+                                                    ? () => onUploadToServerClick(
+                                                        frameworkController,
+                                                        _notificationController)
+                                                    : () => onDeleteFromServerClick(
+                                                        frameworkController,
+                                                        _notificationController),
+                                            child: _isDoingFrameworkRequest
+                                                ? CircularProgressIndicator(
+                                                    color: AppConstants
+                                                        .primaryTextColor)
+                                                : Text(
+                                                    !frameworkController
+                                                            .isLoggedIn
+                                                        ? 'Log in to upload'
+                                                        : trackFile.uploadedTrackId ==
+                                                                null
+                                                            ? 'Upload'
+                                                            : 'Delete from Server',
+                                                    textAlign: TextAlign.center,
+                                                    style: TextStyle(
+                                                      fontSize: AppConstants
+                                                          .textSizeM,
+                                                      color: AppConstants
+                                                          .primaryTextColor,
+                                                    ),
+                                                  ))),
+                                    SizedBox(height: 5),
                                     // Delete Button
                                     Container(
                                         width: double.infinity,
                                         margin:
                                             EdgeInsets.symmetric(horizontal: 8),
                                         child: TextButton(
-                                            style: ButtonStyle(
-                                              backgroundColor:
-                                                  WidgetStatePropertyAll(
-                                                      AppConstants
-                                                          .secondaryBackgroundColor),
-                                            ),
+                                            style:
+                                                AppConstants.primaryButtonStyle,
                                             onPressed: () async {
                                               bool? result =
                                                   await showPopUpDialogue(

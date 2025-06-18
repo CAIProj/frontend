@@ -1,4 +1,4 @@
-import 'package:flutter/rendering.dart';
+import 'package:flutter/material.dart';
 
 class AppConstants {
   AppConstants._();
@@ -43,4 +43,9 @@ class AppConstants {
   static final Color general = Color.fromRGBO(51, 51, 51, 1);
   static final Color success = Color.fromRGBO(90, 182, 118, 1);
   static final Color error = Color.fromRGBO(231, 105, 116, 1);
+
+  static final primaryButtonStyle = ButtonStyle(
+    backgroundColor:
+        WidgetStatePropertyAll(AppConstants.secondaryBackgroundColor),
+  );
 }

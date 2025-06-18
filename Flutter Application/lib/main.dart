@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:tracking_app/functional/notification.dart';
+import 'package:tracking_app/services/notification_controller.dart';
 import 'package:provider/provider.dart';
+import 'package:tracking_app/services/framework_controller.dart';
 import 'pages/home_page.dart';
 
 void main() => runApp(const TrackingApp());
@@ -75,7 +76,8 @@ class TrackingApp extends StatelessWidget {
         themeMode: ThemeMode.system,
         builder: (context, child) => MultiProvider(
           providers: [
-            ChangeNotifierProvider(create: (_) => NotificationController())
+            ChangeNotifierProvider(create: (_) => NotificationController()),
+            ChangeNotifierProvider(create: (_) => FrameworkController())
           ],
           child: child,
         ),

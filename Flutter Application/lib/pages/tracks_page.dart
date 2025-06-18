@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tracking_app/constants/app_constants.dart';
 import 'package:tracking_app/domain/track_file.dart';
-import 'package:tracking_app/functional/notification.dart' as n;
+import 'package:tracking_app/services/notification_controller.dart' as n;
 import 'package:tracking_app/pages/track_page.dart';
 import 'package:tracking_app/services/gpx_handler.dart';
 
@@ -15,6 +15,9 @@ class TracksPage extends StatefulWidget {
 class _TracksPageState extends State<TracksPage> {
   GpxHandler _gpxHandler = GpxHandler();
 
+  late final n.NotificationController _notificationController =
+      Provider.of<n.NotificationController>(context, listen: false);
+
   TextEditingController _searchController = TextEditingController();
 
   List<TrackFile> _trackFiles = [];
@@ -26,6 +29,12 @@ class _TracksPageState extends State<TracksPage> {
   void initState() {
     super.initState();
     fetchFiles();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   void evaluateDisplayedFiles() {
@@ -105,6 +114,27 @@ class _TracksPageState extends State<TracksPage> {
             ),
           ),
         ),
+        actions: [
+          // Load GPX file button
+          IconButton(
+              icon: const Icon(Icons.folder_open),
+              tooltip: 'Load GPX file',
+              onPressed: () async {
+                final (success, error) = await _gpxHandler.importGpxFile();
+                if (success) {
+                  _notificationController.addNotification(n.Notification(
+                      type: n.NotificationType.Success,
+                      text: 'Imported GPX File'));
+                } else {
+                  if (error != null) {
+                    _notificationController.addNotification(
+                      n.Notification(
+                          type: n.NotificationType.Error, text: error),
+                    );
+                  }
+                }
+              }),
+        ],
       ),
       body: Container(
         decoration: BoxDecoration(gradient: AppConstants.appBodyGradient),
@@ -146,6 +176,9 @@ class _TrackInstanceState extends State<TrackInstance> {
   GpxHandler _gpxHandler = GpxHandler();
   TrackFile trackFile;
 
+  late final n.NotificationController _notificationController =
+      Provider.of<n.NotificationController>(context, listen: false);
+
   _TrackInstanceState({required TrackFile this.trackFile});
 
   void _onUpdate() async {
@@ -155,8 +188,6 @@ class _TrackInstanceState extends State<TrackInstance> {
 
   @override
   Widget build(BuildContext context) {
-    n.NotificationController _popUpController =
-        context.read<n.NotificationController>();
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -168,7 +199,7 @@ class _TrackInstanceState extends State<TrackInstance> {
           if (changes == TrackChange.Edited) {
             _onUpdate();
           } else if (changes == TrackChange.Deleted) {
-            _popUpController.addNotification(n.Notification(
+            _notificationController.addNotification(n.Notification(
                 type: n.NotificationType.General, text: 'Track deleted'));
             widget.onDelete();
           }

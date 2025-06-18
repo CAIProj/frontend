@@ -7,8 +7,9 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:tracking_app/functional/graph.dart';
 import 'package:tracking_app/domain/measurement.dart';
-import 'package:tracking_app/functional/notification.dart' as n;
+import 'package:tracking_app/services/notification_controller.dart' as n;
 import 'package:tracking_app/functional/utils.dart';
+import 'package:tracking_app/pages/account_page.dart';
 import 'package:tracking_app/pages/tracks_page.dart';
 import 'package:tracking_app/services/gpx_handler.dart';
 import 'package:tracking_app/constants/app_constants.dart';
@@ -47,6 +48,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   GpxHandler _gpxHandler = GpxHandler();
   PageController _pageViewController = PageController();
 
+  late final n.NotificationController _notificationController =
+      Provider.of<n.NotificationController>(context, listen: false);
+
   /* ---------- LIFECYCLE ---------------------------------------------- */
   @override
   void initState() {
@@ -54,7 +58,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _initLocationSettings();
     _checkLocationPermission();
 
-    context.read<n.NotificationController>().initOverlay(context);
+    _notificationController.initOverlay(context);
   }
 
   @override
@@ -62,6 +66,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _gpsTimer?.cancel();
     _gpsSub?.cancel();
     _baroSub?.cancel();
+    _pageViewController.dispose();
     super.dispose();
   }
 
@@ -231,13 +236,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _gpsSub?.cancel();
     _baroSub?.cancel();
 
-    context.read<n.NotificationController>().addNotification(n.Notification(
+    _notificationController.addNotification(n.Notification(
         type: n.NotificationType.General, text: 'Tracking paused'));
   }
 
   void _resumeTracking() {
     _doTrack();
-    context.read<n.NotificationController>().addNotification(n.Notification(
+    _notificationController.addNotification(n.Notification(
         type: n.NotificationType.General, text: 'Tracking resumed'));
   }
 
@@ -250,7 +255,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _gpsPosition = pos;
       ;
     } on Exception catch (e) {
-      context.read<n.NotificationController>().addNotification(n.Notification(
+      _notificationController.addNotification(n.Notification(
           type: n.NotificationType.Error, text: 'GPS error: $e'));
     }
   }
@@ -268,14 +273,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ));
       });
     } on Exception catch (e) {
-      context.read<n.NotificationController>().addNotification(n.Notification(
+      _notificationController.addNotification(n.Notification(
           type: n.NotificationType.Error, text: 'GPS error: $e'));
     }
   }
 
   Future<void> _stopAndSave() async {
-    final _notificationController = context.read<n.NotificationController>();
-
     // Properly cancel all tracking services
     _gpsTimer?.cancel();
     _gpsTimer = null;
@@ -284,17 +287,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _baroSub?.cancel();
     _baroSub = null;
 
-    if (_meas.isEmpty) {
+    if (_meas.length <= 1) {
       _notificationController.addNotification(n.Notification(
-          type: n.NotificationType.Error,
-          text: 'No tracking data available to export'));
-      return;
+          type: n.NotificationType.General,
+          text: 'Stopped without saving data (too short)'));
+    } else {
+      await _gpxHandler.saveMeasurementsToGpxFile(
+          'Altitude Tracking Data', _meas);
+      _notificationController.addNotification(n.Notification(
+          type: n.NotificationType.Success, text: 'Stopped and saved track'));
     }
-
-    await _gpxHandler.saveMeasurementsToGpxFile(
-        'Altitude Tracking Data', _meas);
-    _notificationController.addNotification(n.Notification(
-        type: n.NotificationType.Success, text: 'Stopped and saved track'));
 
     setState(() {
       _trackingStatus = TrackingStatus.STOPPED;
@@ -305,8 +307,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   /* ---------- UI HELPER WIDGETS -------------------------------------- */
 
   AppBar _buildAppBar() {
-    n.NotificationController _popUpController =
-        context.read<n.NotificationController>();
     return AppBar(
       elevation: 0,
       foregroundColor: AppConstants.primaryTextColor,
@@ -326,27 +326,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   MaterialPageRoute(builder: (context) => TracksPage()))
               : null,
         ),
-        // Load GPX file button
+        // Login / Account button
         IconButton(
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Load GPX file',
-            onPressed: _trackingStatus == TrackingStatus.STOPPED
-                ? () async {
-                    final (success, error) = await _gpxHandler.importGpxFile();
-                    if (success) {
-                      _popUpController.addNotification(n.Notification(
-                          type: n.NotificationType.Success,
-                          text: 'Imported GPX File'));
-                    } else {
-                      if (error != null) {
-                        _popUpController.addNotification(
-                          n.Notification(
-                              type: n.NotificationType.Error, text: error),
-                        );
-                      }
-                    }
-                  }
-                : null),
+          icon: const Icon(Icons.account_circle),
+          tooltip: 'Account',
+          onPressed: _trackingStatus == TrackingStatus.STOPPED
+              ? () => Navigator.push(context,
+                  MaterialPageRoute(builder: (context) => AccountPage()))
+              : null,
+        ),
         // Help/about button
         IconButton(
           icon: const Icon(Icons.help_outline),
@@ -370,8 +358,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               Text(
                   'This app tracks your location and altitude using GPS and barometric sensors.'),
               SizedBox(height: 8),
-              Text('• Tap START to begin tracking'),
-              Text('• Tap STOP & SAVE to export as GPX'),
+              Text('• HOLD and RELEASE to begin tracking'),
+              Text('• TAP to pause tracking'),
+              Text(
+                  '• HOLD and RELEASE again to stop and save the recorded track'),
               SizedBox(height: 8),
               Text(
                   'Your data is stored only on your device and can be shared as a GPX file.'),
@@ -653,6 +643,12 @@ class _TrackOverviewState extends State<TrackOverviewWidget> {
   PageController _pageViewController = PageController();
 
   @override
+  void dispose() {
+    _pageViewController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Column(
       children: [
@@ -847,19 +843,19 @@ class _TimeWidgetState extends State<TimeWidget>
     );
   }
 
+  @override
+  void dispose() {
+    _timer.cancel();
+    _ticker.stop();
+    super.dispose();
+  }
+
   String _getClockString() {
     return DateFormat('HH:mm').format(DateTime.now());
   }
 
   String _getStopwatchString() {
     return '${((accumulatedElapsed.inSeconds + elapsedBeforePause.inSeconds) ~/ 60).toString().padLeft(2, '0')}:${((accumulatedElapsed.inSeconds + elapsedBeforePause.inSeconds) % 60).toString().padLeft(2, '0')}';
-  }
-
-  @override
-  void dispose() {
-    _timer.cancel();
-    _ticker.stop();
-    super.dispose();
   }
 
   @override
@@ -1212,8 +1208,7 @@ class _PulsingRingState extends State<PulsingRingWidget>
 
       widget.sizeNotifier.value[widget.index] = max(
           (widget.sizeNotifier.value[widget.index] +
-                  deltaSecs * currentVelocity) %
-              maxSize,
+              deltaSecs * currentVelocity),
           minimumSize);
 
       // Min reached? Stop all movement (will overflow if held for too long)
@@ -1223,16 +1218,19 @@ class _PulsingRingState extends State<PulsingRingWidget>
           currentVelocity != 0.0) {
         currentVelocity = 0.0;
         currentAcceleration = 0.0;
-        widget.onLongHold();
+        // If largest when held
+        if (indexWhenHeld! == widget.sizeNotifier.value.length - 1) {
+          widget.onLongHold();
+        }
       }
     }
     wasPreviouslyHeld = isHeld;
 
-    final opacityCurve = Curves.easeIn
-        .transform(widget.sizeNotifier.value[widget.index] / maxSize);
+    final opacityCurve = Curves.easeIn.transform(
+        (widget.sizeNotifier.value[widget.index] / maxSize).clamp(0.0, 1.0));
 
-    final borderCurve = Curves.easeOutQuart
-        .transform(widget.sizeNotifier.value[widget.index] / maxSize);
+    final borderCurve = Curves.easeOutQuart.transform(
+        (widget.sizeNotifier.value[widget.index] / maxSize).clamp(0.0, 1.0));
 
     return Container(
       height: widget.size,
