@@ -59,5 +59,18 @@ Android SDK Command-line Tools are necessary for proper work of project. Install
 
 ## Code Coverage
 
-You can view the full coverage report [here](https://caiproj.github.io/frontend/).
+---
+
+## Code Coverage
+
+You can view the full test coverage report for the Flutter frontend [here](https://caiproj.github.io/frontend/).
+
+This report is automatically generated using:
+- `flutter test --coverage`
+- `genhtml coverage/lcov.info -o coverage/html`
+
+The report includes:
+- Line-by-line test coverage
+- Visual indicators for covered/missed code
+
 
