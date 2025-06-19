@@ -56,3 +56,8 @@ Android SDK Command-line Tools are necessary for proper work of project. Install
 2. Click on SDK Manager and new window is opened
 3. In "Android SDK" tab a "SDK Platforms" should be already selected. Click on SDK Tools.
 4. Checkmark "Android SDK Command-line Tools" to install
+
+## Code Coverage
+
+You can view the full coverage report [here](https://caiproj.github.io/frontend/).
+
