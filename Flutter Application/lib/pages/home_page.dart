@@ -1301,6 +1301,13 @@ class _StatisticsState extends State<StatisticsWidget> {
         children: [
           // Total distance
           Text(
+            'Distance',
+            style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
+            ),
+          ),
+          Text(
             '${_getDistanceString()}',
             style: TextStyle(
               fontSize: AppConstants.textSizeXL,
@@ -1308,6 +1315,13 @@ class _StatisticsState extends State<StatisticsWidget> {
             ),
           ),
           // Current elevation
+          Text(
+            'Elevation',
+            style: TextStyle(
+              fontSize: AppConstants.textSizeM,
+              color: AppConstants.primaryTextColor,
+            ),
+          ),
           Text(
             '${((widget.measurements.lastOrNull?.baroAlt ?? widget.measurements.lastOrNull?.gpsAlt ?? 0) * 10).truncate() / 10} m',
             style: TextStyle(
