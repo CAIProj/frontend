@@ -2,8 +2,9 @@ import "dart:convert";
 import "dart:io";
 import "package:flutter/foundation.dart";
 import "package:http/http.dart" as http;
-import "package:path_provider/path_provider.dart";
 import "package:tracking_app/domain/track_file.dart";
+import "package:tracking_app/services/gpx_handler.dart";
+import "package:tracking_app/services/hash.dart";
 
 class UploadedGPXFile {
   final int id;
@@ -19,41 +20,48 @@ class UploadedGPXFile {
 
 class FrameworkController with ChangeNotifier {
   final String baseUrl = "https://trackin-api-nj15.onrender.com/";
+
   String? authCredentials = null;
+  Map<String, int>? localToUploadedMapping = null;
 
   bool get isLoggedIn => authCredentials != null;
 
-  FrameworkController() {
-    // _fetchSavedTokenOnStart();
+  Future<void> doAuthed(String credentials) async {
+    authCredentials = credentials;
+    localToUploadedMapping = await mapLocalToUploadedFiles();
+    notifyListeners();
   }
 
   void doUnauthed() {
     authCredentials = null;
+    localToUploadedMapping = null;
     notifyListeners();
   }
 
-  Future<void> _fetchSavedTokenOnStart() async {
-    File file = File((await _savedTokenDirectory).path);
+  Future<Map<String, int>> mapLocalToUploadedFiles() async {
+    final uploaded = await downloadAllGPXFiles();
+    final Map<String, UploadedGPXFile> uploadedHashes = Map();
 
-    // Expect singular line containing token
-    final contents = await file.readAsString();
-
-    // Test if token is valid
-    // If valid set as it
-    authCredentials = contents;
-    // Else stay as null
-    notifyListeners();
-  }
-
-  Future<Directory> get _savedTokenDirectory async {
-    final Directory dir = Directory(
-        (await getApplicationDocumentsDirectory()).path + 'accountToken.txt');
-
-    if (!(await dir.exists())) {
-      await dir.create(recursive: true);
+    for (final v in uploaded.entries) {
+      if (v.value != null) {
+        uploadedHashes[getHash(v.value!)] = v.key;
+      }
     }
 
-    return dir;
+    final List<TrackFile> locals = await GpxHandler().getAllTrackFiles();
+
+    final Map<String, int> mapping = Map();
+
+    locals.forEach((v) {
+      File file = File(v.path);
+      final hash = getHash(file.readAsStringSync());
+      final uploadedData = uploadedHashes[hash];
+      if (uploadedData != null) {
+        mapping[v.path] = uploadedData.id;
+      }
+    });
+
+    return mapping;
   }
 
   Future<bool> isTokenValid(String token) async {
@@ -90,7 +98,7 @@ class FrameworkController with ChangeNotifier {
         body: {"username": username, "password": password},
       );
       if (response.statusCode == 200) {
-        authCredentials = jsonDecode(response.body)['access_token'];
+        await doAuthed(jsonDecode(response.body)['access_token']);
         return true;
       } else {
         print("Request failed with status: ${response.statusCode}");
@@ -130,7 +138,12 @@ class FrameworkController with ChangeNotifier {
       if (response.statusCode == 200) {
         final responseBody =
             jsonDecode((await http.Response.fromStream(response)).body);
-        return responseBody['file_id'];
+
+        final id = responseBody['file_id'];
+        localToUploadedMapping?[trackFile.path] = id;
+        notifyListeners();
+
+        return id;
       } else if (response.statusCode == 403) {
         doUnauthed();
       } else {
@@ -140,6 +153,37 @@ class FrameworkController with ChangeNotifier {
       print("Error: $e");
     }
     return null;
+  }
+
+  Future<String?> downloadGPXFile(int uploadedId) async {
+    final url = Uri.parse(baseUrl + "files/$uploadedId");
+    try {
+      final response = await http.get(url, headers: {
+        'Authorization': 'Bearer $authCredentials',
+      });
+
+      if (response.statusCode == 200) {
+        return response.body;
+      } else if (response.statusCode == 403) {
+        doUnauthed();
+      } else {
+        print("Request failed with status: ${response.statusCode}");
+      }
+    } catch (e) {
+      print("Error: $e");
+    }
+    return null;
+  }
+
+  Future<Map<UploadedGPXFile, String?>> downloadAllGPXFiles() async {
+    final uploadedData = await getUploadedGPXFiles();
+    final Map<UploadedGPXFile, String?> map = Map();
+
+    for (final v in uploadedData ?? []) {
+      final fileContents = await downloadGPXFile(v.id);
+      map[v] = fileContents;
+    }
+    return map;
   }
 
   Future<List<UploadedGPXFile>?> getUploadedGPXFiles() async {
@@ -183,6 +227,11 @@ class FrameworkController with ChangeNotifier {
       });
 
       if (response.statusCode == 200) {
+        final key = localToUploadedMapping?.entries
+            .firstWhere((entry) => entry.value == fileId);
+        localToUploadedMapping?.remove(key);
+
+        notifyListeners();
         return true;
       } else if (response.statusCode == 403) {
         doUnauthed();

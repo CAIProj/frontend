@@ -82,10 +82,6 @@ class _TrackPageState extends State<TrackPage> {
       notificationController.addNotification(n.Notification(
           type: n.NotificationType.Success,
           text: 'Uploaded with ID $uploadId'));
-      await _gpxHandler.setFileUploadId(
-        trackFile.path,
-        uploadId,
-      );
 
       triggerFileChange();
     }
@@ -96,23 +92,19 @@ class _TrackPageState extends State<TrackPage> {
   }
 
   void onDeleteFromServerClick(FrameworkController frameworkController,
-      n.NotificationController notificationController) async {
+      n.NotificationController notificationController, int fileId) async {
     if (_isDoingFrameworkRequest) return;
     setState(() {
       _isDoingFrameworkRequest = true;
     });
 
-    final success =
-        await frameworkController.deleteGPXFile(trackFile.uploadedTrackId!);
+    final success = await frameworkController.deleteGPXFile(fileId);
 
     if (success) {
-      notificationController.addNotification(n.Notification(
-          type: n.NotificationType.Success,
-          text:
-              'Deleted file with ID ${trackFile.uploadedTrackId} from server'));
-      await _gpxHandler.setFileUploadId(
-        trackFile.path,
-        null,
+      notificationController.addNotification(
+        n.Notification(
+            type: n.NotificationType.Success,
+            text: 'Deleted file with ID ${fileId} from server'),
       );
 
       triggerFileChange();
@@ -127,6 +119,8 @@ class _TrackPageState extends State<TrackPage> {
   Widget build(BuildContext context) {
     final frameworkController =
         Provider.of<FrameworkController>(context, listen: true);
+
+    final trackId = frameworkController.localToUploadedMapping?[trackFile.path];
 
     final distances = get_distances(trackFile.measurements);
     final totalDistance = distances.isEmpty ? 0.0 : distances.last;
@@ -326,7 +320,7 @@ class _TrackPageState extends State<TrackPage> {
                                               ),
                                             ))),
                                     SizedBox(height: 5),
-                                    // Upload Button
+                                    // Upload / Delete From Server Button
                                     Container(
                                         width: double.infinity,
                                         margin:
@@ -338,14 +332,15 @@ class _TrackPageState extends State<TrackPage> {
                                                     .isLoggedIn
                                                 // Do nothing if not logged in
                                                 ? () {}
-                                                : trackFile.uploadedTrackId ==
-                                                        null
+                                                // Else check if we have not uploaded to the server already
+                                                : trackId == null
                                                     ? () => onUploadToServerClick(
                                                         frameworkController,
                                                         _notificationController)
                                                     : () => onDeleteFromServerClick(
                                                         frameworkController,
-                                                        _notificationController),
+                                                        _notificationController,
+                                                        trackId),
                                             child: _isDoingFrameworkRequest
                                                 ? CircularProgressIndicator(
                                                     color: AppConstants
@@ -353,9 +348,10 @@ class _TrackPageState extends State<TrackPage> {
                                                 : Text(
                                                     !frameworkController
                                                             .isLoggedIn
+                                                        // If not logged in
                                                         ? 'Log in to upload'
-                                                        : trackFile.uploadedTrackId ==
-                                                                null
+                                                        // Else check if we have not uploaded to the server already
+                                                        : trackId == null
                                                             ? 'Upload'
                                                             : 'Delete from Server',
                                                     textAlign: TextAlign.center,

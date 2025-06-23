@@ -6,7 +6,6 @@ class TrackFile {
   final DateTime date;
   final int pointCount;
   final List<Measurement> measurements;
-  final int? uploadedTrackId;
 
   TrackFile({
     required this.path,
@@ -14,7 +13,6 @@ class TrackFile {
     required this.date,
     required this.pointCount,
     required this.measurements,
-    required this.uploadedTrackId,
   });
 
   String get displayName =>

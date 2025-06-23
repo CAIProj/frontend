@@ -1,5 +1,5 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:tracking_app/domain/measurement.dart';
@@ -19,53 +19,6 @@ class GpxHandler {
     return dir;
   }
 
-  Future<File> get _fileToUploadIdMappingFile async {
-    final File file = File((await getApplicationDocumentsDirectory()).path +
-        '/fileToUploadIdMapping.json');
-
-    if (!(await file.exists())) {
-      await file.create();
-      await file.writeAsString(jsonEncode({}));
-    }
-
-    return file;
-  }
-
-  Future<Map<String, int>> get _fileToUploadIdMapping async {
-    final Map<String, dynamic> decoded =
-        jsonDecode(await (await _fileToUploadIdMappingFile).readAsString());
-
-    final Map<String, int> mapping = {};
-
-    decoded.forEach((k, v) {
-      if (v is int) {
-        // If int, do nothing
-      } else if (v is String) {
-        v = int.tryParse(v);
-      } else {
-        return;
-      }
-      mapping[k] = v;
-    });
-
-    List<String> keysToRemove = [];
-    // Ensure all listed files exist
-    for (String k in mapping.keys.toList()) {
-      if (!(await File(k).exists())) {
-        keysToRemove.add(k.toString());
-      }
-    }
-    for (String k in keysToRemove) {
-      mapping.remove(k);
-    }
-    if (keysToRemove.isNotEmpty) {
-      await (await _fileToUploadIdMappingFile)
-          .writeAsString(jsonEncode(mapping));
-    }
-
-    return mapping;
-  }
-
   String _fileStamp() =>
       'TrackIN_${DateTime.now().toIso8601String().replaceAll(RegExp(r'[:.]'), '-')}';
 
@@ -77,18 +30,26 @@ class GpxHandler {
     return await Future.wait(futureFiles);
   }
 
+  // Heavy function (grows with amount of gpx files on system), pagination would be better
   Future<List<TrackFile>> getAllTrackFiles() async {
     final files = await _getAllGpxFiles();
-    final mapped = await Future.wait(files.map((f) async {
-      try {
-        final file = await loadGpxFile(f.path);
-        return file;
-      } catch (e) {
-        print("${f.path} is unparsable!");
-        print(e);
-        return null;
-      }
-    }));
+
+    final List<TrackFile?> mapped = await _processConcurrency<TrackFile?>(
+        files
+            .map(
+              (f) => () async {
+                try {
+                  final file = await loadGpxFile(f.path);
+                  return file;
+                } catch (e) {
+                  print("${f.path} is unparsable!");
+                  print(e);
+                  return null;
+                }
+              },
+            )
+            .toList(),
+        3);
 
     return mapped.whereType<TrackFile>().toList();
   }
@@ -186,6 +147,41 @@ class GpxHandler {
     }
   }
 
+  Future<List<T?>> _processConcurrency<T>(
+    List<Future<T> Function()> tasks,
+    int concurrencyAmount,
+  ) async {
+    final List<T?> results = List<T?>.filled(tasks.length, null);
+    int index = 0;
+
+    final List<Future> active = [];
+
+    Future<void> doTask() async {
+      if (index >= tasks.length) return;
+
+      final thisIndex = index;
+      index++;
+
+      try {
+        final result = await tasks[thisIndex]();
+        results[thisIndex] = result;
+      } catch (e, stack) {
+        print('Error in task $thisIndex: $e\n$stack');
+        results[thisIndex] = null;
+      }
+
+      await doTask();
+    }
+
+    for (int i = 0; i < min(concurrencyAmount, tasks.length); i++) {
+      active.add(doTask());
+    }
+
+    await Future.wait(active);
+
+    return results;
+  }
+
   Future<TrackFile> loadGpxFile(String path) async {
     // Read the file contents
     final file = File(path);
@@ -198,29 +194,13 @@ class GpxHandler {
     // Parse GPX data
     final parsedMeasurements = parseGpxData(contents);
 
-    final mapping = await _fileToUploadIdMapping;
-
     // Create a TrackFile object
     return TrackFile(
-      path: path,
-      name: name?.innerText,
-      date: parsedMeasurements.first.t,
-      pointCount: parsedMeasurements.length,
-      measurements: parsedMeasurements,
-      uploadedTrackId: mapping.containsKey(path) ? mapping[path] : null,
-    );
-  }
-
-  Future<void> setFileUploadId(String path, int? uploadId) async {
-    final mappingFile = await _fileToUploadIdMappingFile;
-
-    final mapping = await _fileToUploadIdMapping;
-    if (uploadId != null) {
-      mapping[path] = uploadId;
-    } else {
-      mapping.remove(path);
-    }
-    await mappingFile.writeAsString(jsonEncode(mapping));
+        path: path,
+        name: name?.innerText,
+        date: parsedMeasurements.first.t,
+        pointCount: parsedMeasurements.length,
+        measurements: parsedMeasurements);
   }
 
   Future<(bool, String?)> importGpxFile() async {

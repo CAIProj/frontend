@@ -23,6 +23,7 @@ class _TracksPageState extends State<TracksPage> {
   List<TrackFile> _trackFiles = [];
   List<TrackFile> _displayedFiles = [];
 
+  bool _loading = false;
   bool _isTyping = false;
 
   @override
@@ -58,11 +59,18 @@ class _TracksPageState extends State<TracksPage> {
   }
 
   void fetchFiles() async {
+    setState(() {
+      _loading = true;
+    });
     final files = await _gpxHandler.getAllTrackFiles();
     setState(() {
       _trackFiles = files;
     });
     evaluateDisplayedFiles();
+
+    setState(() {
+      _loading = false;
+    });
   }
 
   @override
@@ -138,22 +146,27 @@ class _TracksPageState extends State<TracksPage> {
       ),
       body: Container(
         decoration: BoxDecoration(gradient: AppConstants.appBodyGradient),
-        child: ListView.separated(
-          padding: EdgeInsets.symmetric(vertical: 16),
-          itemCount: _displayedFiles.length,
-          separatorBuilder: (context, index) => SizedBox(height: 16),
-          itemBuilder: (context, index) {
-            TrackFile trackFile = _displayedFiles[index];
-            return TrackInstance(
-              key: ValueKey(trackFile),
-              trackFile: trackFile,
-              onDelete: () {
-                _trackFiles.remove(trackFile);
-                evaluateDisplayedFiles();
-              },
-            );
-          },
-        ),
+        child: _loading
+            ? Center(
+                child: CircularProgressIndicator(
+                color: AppConstants.primaryTextColor,
+              ))
+            : ListView.separated(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                itemCount: _displayedFiles.length,
+                separatorBuilder: (context, index) => SizedBox(height: 16),
+                itemBuilder: (context, index) {
+                  TrackFile trackFile = _displayedFiles[index];
+                  return TrackInstance(
+                    key: ValueKey(trackFile),
+                    trackFile: trackFile,
+                    onDelete: () {
+                      _trackFiles.remove(trackFile);
+                      evaluateDisplayedFiles();
+                    },
+                  );
+                },
+              ),
       ),
     );
   }
