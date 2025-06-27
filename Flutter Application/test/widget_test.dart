@@ -22,3 +22,39 @@ void main() {
   });
 }
 
+testWidgets('HomePage contains expected widgets', (WidgetTester tester) async {
+  await tester.pumpWidget(const TrackingApp());
+
+  // Check for a floating action button
+  expect(find.byType(FloatingActionButton), findsOneWidget);
+
+  // Check for a ListView or any other main widget you use
+  expect(find.byType(ListView), findsAtLeastNWidgets(1));
+
+  // Check for a specific text or button
+  expect(find.text('About TrackIN'), findsOneWidget);
+});
+
+testWidgets('Tap + button and expect increment or dialog', (WidgetTester tester) async {
+  await tester.pumpWidget(const TrackingApp());
+
+  // Tap on a '+' icon if it exists
+  await tester.tap(find.byIcon(Icons.add));
+  await tester.pump();
+
+  // Check result of the tap
+  expect(find.text('1'), findsOneWidget); 
+});
+
+testWidgets('Navigate to another page', (WidgetTester tester) async {
+  await tester.pumpWidget(const TrackingApp());
+
+  // Tap on a navigation button
+  await tester.tap(find.text('Details'));
+  await tester.pumpAndSettle();
+
+  // Verify the new screen
+  expect(find.text('Details'), findsOneWidget); 
+});
+
+
